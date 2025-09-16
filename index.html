@@ -257,6 +257,11 @@
         let isLoggedIn = false;
         let allRequisitionsDocs = [], allItemsDocs = [], allEmployeesDocs = [], allStockLocationsDocs = [];
 
+        // Verifica se o usuário já estava logado na sessão
+        if (sessionStorage.getItem('isUserLoggedIn') === 'true') {
+            isLoggedIn = true;
+        }
+
         async function setupAuthAndFirestore() {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) { await signInWithCustomToken(auth, __initial_auth_token); } 
@@ -266,6 +271,7 @@
                 employeesCollection = collection(db, `/artifacts/${appId}/public/data/employees`);
                 stockLocationsCollection = collection(db, `/artifacts/${appId}/public/data/stockLocations`);
                 listenToAllCollections();
+                updateUIForAuth(); // Garante que a UI reflita o estado de login no carregamento
             } catch (error) {
                 console.error("Erro na autenticação ou Firestore:", error);
                 [loadingRequisitions, loadingItems, loadingEmployees, loadingStock].forEach(l => l.classList.add('hidden'));
@@ -513,6 +519,7 @@
             e.preventDefault();
             if (loginForm['login-user'].value === 'tbx' && loginForm['login-pass'].value === 'tbx1') {
                 isLoggedIn = true;
+                sessionStorage.setItem('isUserLoggedIn', 'true'); // Salva o estado de login
                 loginForm.reset();
                 loginModal.classList.add('hidden');
                 updateUIForAuth();
@@ -648,6 +655,7 @@
         loginLogoutBtn.addEventListener('click', () => {
             if (isLoggedIn) {
                 isLoggedIn = false;
+                sessionStorage.removeItem('isUserLoggedIn'); // Remove o estado de login
                 updateUIForAuth();
             } else {
                 loginError.classList.add('hidden');
@@ -697,4 +705,6 @@
     </script>
 </body>
 </html>
+
+
 
