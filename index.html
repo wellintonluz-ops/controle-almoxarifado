@@ -517,13 +517,13 @@
                         const quantity = row[qtyKey] ? Number(row[qtyKey]) : null;
 
                         if (!existingCodes.has(code) && !newCodesInBatch.has(code)) {
-                            const newItemRef = doc(collection(db, itemsCollection.path));
+                            const newItemRef = doc(itemsCollection);
                             batch.set(newItemRef, { code, description });
                             newCodesInBatch.add(code);
                         }
 
                         if (address && quantity > 0) {
-                            const newLocationRef = doc(collection(db, stockLocationsCollection.path));
+                            const newLocationRef = doc(stockLocationsCollection);
                             batch.set(newLocationRef, { itemCode: code, address, quantity });
                         }
                     }
