@@ -475,10 +475,18 @@
                     if (json.length === 0) throw new Error("A planilha está vazia.");
                     
                     const batch = writeBatch(db);
+                    const newCodesInBatch = new Set();
+                    const existingCodes = new Set(allItemsDocs.map(doc => doc.data().code));
 
                     for (const row of json) {
                         const codeKey = Object.keys(row).find(k => k.toLowerCase() === 'código' || k.toLowerCase() === 'codigo');
                         const descKey = Object.keys(row).find(k => k.toLowerCase() === 'descrição' || k.toLowerCase() === 'descricao');
+                        
+                        if (!codeKey || !descKey) {
+                            console.warn("Pulando linha por falta de cabeçalho 'Código' ou 'Descrição'", row);
+                            continue;
+                        }
+
                         const addressKey = Object.keys(row).find(k => k.toLowerCase() === 'endereço' || k.toLowerCase() === 'endereco');
                         const qtyKey = Object.keys(row).find(k => k.toLowerCase() === 'quantidade');
 
@@ -489,10 +497,10 @@
 
                         if (!code || !description) continue;
 
-                        let item = allItemsDocs.find(doc => doc.data().code === code);
-                        if (!item) {
+                        if (!existingCodes.has(code) && !newCodesInBatch.has(code)) {
                             const newItemRef = doc(itemsCollection);
                             batch.set(newItemRef, { code, description });
+                            newCodesInBatch.add(code);
                         }
 
                         if (address && quantity > 0) {
@@ -705,6 +713,4 @@
     </script>
 </body>
 </html>
-
-
 
