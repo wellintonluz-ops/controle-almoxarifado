@@ -52,6 +52,7 @@
             border-bottom: 2px solid transparent; transition: all 0.3s;
         }
         .tab-active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
+        .stock-low { background-color: #fef9c3; } /* Amarelo claro para estoque baixo */
     </style>
 </head>
 <body class="antialiased text-gray-800">
@@ -281,12 +282,13 @@
 
         async function setupAuthAndFirestore() {
             try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) { await signInWithCustomToken(auth, __initial_auth_token); } 
-                else { await signInAnonymously(auth); }
-                requisitionsCollection = collection(db, `requisitions`);
-                itemsCollection = collection(db, `items`);
-                employeesCollection = collection(db, `employees`);
-                stockLocationsCollection = collection(db, `stockLocations`);
+                await signInAnonymously(auth);
+                
+                const basePath = `/artifacts/${appId}/public/data`;
+                requisitionsCollection = collection(db, `${basePath}/requisitions`);
+                itemsCollection = collection(db, `${basePath}/items`);
+                employeesCollection = collection(db, `${basePath}/employees`);
+                stockLocationsCollection = collection(db, `${basePath}/stockLocations`);
                 
                 isFirestoreReady = true;
 
