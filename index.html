@@ -161,7 +161,11 @@
                         <h2 class="text-xl font-semibold mb-4">Entrada Manual no Estoque</h2>
                         <form id="stock-entry-form">
                             <div class="mb-4">
-                                <label for="stock-item-select" class="block text-sm font-medium text-gray-700">Item</label>
+                                <label for="stock-item-search" class="block text-sm font-medium text-gray-700">Bipar ou Pesquisar por Código</label>
+                                <input type="text" id="stock-item-search" placeholder="Bipe o código de barras aqui..." class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                            </div>
+                            <div class="mb-4">
+                                <label for="stock-item-select" class="block text-sm font-medium text-gray-700">Ou Selecione o Item</label>
                                 <select id="stock-item-select" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
                                     <option value="">Selecione um item...</option>
                                 </select>
@@ -321,7 +325,7 @@
         const employeeForm = document.getElementById('employee-form'), employeesListBody = document.getElementById('employees-list'), loadingEmployees = document.getElementById('loading-employees'), noEmployeesMessage = document.getElementById('no-employees'), submitEmployeeBtn = document.getElementById('submit-employee-btn');
         const statusModal = document.getElementById('status-modal'), statusSelect = document.getElementById('status-select'), modalRequisitionId = document.getElementById('modal-requisition-id'), modalOriginalStatus = document.getElementById('modal-original-status'), cancelUpdateBtn = document.getElementById('cancel-update'), confirmUpdateBtn = document.getElementById('confirm-update');
         const loginModal = document.getElementById('login-modal'), loginForm = document.getElementById('login-form'), cancelLoginBtn = document.getElementById('cancel-login'), loginError = document.getElementById('login-error');
-        const loadingStock = document.getElementById('loading-stock'), stockListBody = document.getElementById('stock-list'), noStockItems = document.getElementById('no-stock-items'), stockEntryForm = document.getElementById('stock-entry-form'), stockItemSelect = document.getElementById('stock-item-select'), submitStockEntryBtn = document.getElementById('submit-stock-entry-btn');
+        const loadingStock = document.getElementById('loading-stock'), stockListBody = document.getElementById('stock-list'), noStockItems = document.getElementById('no-stock-items'), stockEntryForm = document.getElementById('stock-entry-form'), stockItemSelect = document.getElementById('stock-item-select'), submitStockEntryBtn = document.getElementById('submit-stock-entry-btn'), stockItemSearchInput = document.getElementById('stock-item-search');
         const locationSelectModal = document.getElementById('location-select-modal'), locationsList = document.getElementById('locations-list'), locationSelectError = document.getElementById('location-select-error'), confirmLocationSelectionBtn = document.getElementById('confirm-location-selection'), cancelLocationSelectionBtn = document.getElementById('cancel-location-selection'), modalLocationReqId = document.getElementById('modal-location-req-id');
         const editItemModal = document.getElementById('edit-item-modal'), editItemForm = document.getElementById('edit-item-form'), cancelEditItemBtn = document.getElementById('cancel-edit-item');
         const dashboardPeriodSelect = document.getElementById('dashboard-period');
@@ -940,6 +944,26 @@
         confirmLocationSelectionBtn.addEventListener('click', confirmDeliveryFromLocation);
         cancelEditItemBtn.addEventListener('click', () => editItemModal.classList.add('hidden'));
 
+        function handleBarcodeSearch() {
+            const codeToFind = stockItemSearchInput.value.trim();
+            if (!codeToFind) return;
+
+            const foundItemDoc = allItemsDocs.find(doc => doc.data().code === codeToFind);
+
+            if (foundItemDoc) {
+                const itemData = foundItemDoc.data();
+                const optionValue = JSON.stringify({ id: foundItemDoc.id, code: itemData.code, description: itemData.description });
+                stockItemSelect.value = optionValue;
+                
+                stockItemSearchInput.value = '';
+                document.getElementById('stock-entry-address').focus();
+            } else {
+                alert('Item com o código "' + codeToFind + '" não encontrado.');
+                stockItemSelect.value = '';
+                stockItemSearchInput.value = '';
+                stockItemSearchInput.focus();
+            }
+        }
 
         filterStatus.addEventListener('change', renderRequisitions);
         filterRequester.addEventListener('input', renderRequisitions);
@@ -962,6 +986,7 @@
         
         dashboardPeriodSelect.addEventListener('change', renderDashboard);
         dashboardRequesterSelect.addEventListener('change', renderDashboard);
+        stockItemSearchInput.addEventListener('change', handleBarcodeSearch);
 
         setupAuthAndFirestore();
     </script>
