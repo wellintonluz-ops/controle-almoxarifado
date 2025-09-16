@@ -277,7 +277,7 @@
                 isFirestoreReady = true;
 
                 listenToAllCollections();
-                updateUIForAuth(); // Garante que a UI reflita o estado de login no carregamento
+                updateUIForAuth(); 
             } catch (error) {
                 console.error("Erro na autenticação ou Firestore:", error);
                 isFirestoreReady = false;
@@ -376,12 +376,10 @@
         };
         
         function updateUIForAuth() {
-            const canInteract = isLoggedIn && isFirestoreReady;
-            
-            const tabs = [tabStock, tabItems, tabEmployees];
-            const requisitionSubmitBtn = document.querySelector('#requisition-form button[type="submit"]');
-            const buttons = [submitStockEntryBtn, submitItemBtn, submitEmployeeBtn, importExcelBtn, requisitionSubmitBtn];
+            const isReady = isFirestoreReady;
+            const isAdminReady = isLoggedIn && isFirestoreReady;
 
+            const tabs = [tabStock, tabItems, tabEmployees];
             if (isLoggedIn) {
                 loginLogoutBtn.textContent = 'Logout';
                 loginLogoutBtn.classList.replace('btn-primary', 'btn-secondary');
@@ -394,24 +392,14 @@
                     handleTabClick(tabRequisitions, viewRequisitions, tabs, [viewStock, viewItems, viewEmployees]);
                 }
             }
-            
-            buttons.forEach(b => {
-                if (b) b.disabled = !canInteract;
-            });
 
-            if (!isFirestoreReady) {
-                [...document.querySelectorAll('input, select, button, textarea')].forEach(el => {
-                    if (el.id !== 'login-logout-btn') el.disabled = true;
-                });
-            } else {
-                 [...document.querySelectorAll('input, select, button, textarea')].forEach(el => {
-                    if (el.id !== 'login-logout-btn' && !el.closest('form')) el.disabled = false;
-                });
-                if(!isLoggedIn){
-                    [...document.querySelectorAll('#view-items button, #view-employees button, #view-stock button')].forEach(b => b.disabled = true);
-                }
-            }
-            
+            const requisitionSubmitBtn = document.querySelector('#requisition-form button[type="submit"]');
+            if (requisitionSubmitBtn) requisitionSubmitBtn.disabled = !isReady;
+            if (submitStockEntryBtn) submitStockEntryBtn.disabled = !isAdminReady;
+            if (submitItemBtn) submitItemBtn.disabled = !isAdminReady;
+            if (submitEmployeeBtn) submitEmployeeBtn.disabled = !isAdminReady;
+            if (importExcelBtn) importExcelBtn.disabled = !isAdminReady;
+
             renderRequisitions();
             renderItems();
             renderEmployees();
@@ -529,13 +517,13 @@
                         const quantity = row[qtyKey] ? Number(row[qtyKey]) : null;
 
                         if (!existingCodes.has(code) && !newCodesInBatch.has(code)) {
-                            const newItemRef = doc(itemsCollection);
+                            const newItemRef = doc(collection(db, itemsCollection.path));
                             batch.set(newItemRef, { code, description });
                             newCodesInBatch.add(code);
                         }
 
                         if (address && quantity > 0) {
-                            const newLocationRef = doc(stockLocationsCollection);
+                            const newLocationRef = doc(collection(db, stockLocationsCollection.path));
                             batch.set(newLocationRef, { itemCode: code, address, quantity });
                         }
                     }
