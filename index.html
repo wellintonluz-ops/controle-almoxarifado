@@ -33,10 +33,12 @@
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
             width: 90%; max-width: 500px;
         }
-        .btn-primary { background-color: #2563eb; color: white; transition: background-color: 0.3s; }
+        .btn-primary { background-color: #2563eb; color: white; transition: background-color 0.3s; }
         .btn-primary:hover { background-color: #1d4ed8; }
+        .btn-primary:disabled { background-color: #9ca3af; cursor: not-allowed; }
         .btn-secondary { background-color: #6b7280; color: white; transition: background-color: 0.3s; }
         .btn-secondary:hover { background-color: #4b5563; }
+        .btn-secondary:disabled { background-color: #9ca3af; cursor: not-allowed; }
         .btn-danger { background-color: #dc2626; color: white; transition: background-color: 0.3s; }
         .btn-danger:hover { background-color: #b91c1c; }
         .loader {
@@ -87,7 +89,7 @@
                     <div class="md:col-span-2"><label for="selected-item-code" class="block text-sm font-medium text-gray-700">Código do Item</label><input type="text" id="selected-item-code" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 focus:outline-none sm:text-sm"></div>
                     <div class="md:col-span-1"><label for="quantity" class="block text-sm font-medium text-gray-700">Quantidade</label><input type="number" id="quantity" name="quantity" min="1" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
                     <div class="md:col-span-6"><label for="justification" class="block text-sm font-medium text-gray-700">Justificativa</label><textarea id="justification" name="justification" rows="3" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></textarea></div>
-                    <div class="md:col-span-6 text-right"><button type="submit" class="btn-primary font-semibold py-2 px-6 rounded-md shadow-sm">Enviar Requisição</button></div>
+                    <div class="md:col-span-6 text-right"><button type="submit" class="btn-primary font-semibold py-2 px-6 rounded-md shadow-sm" disabled>Enviar Requisição</button></div>
                 </form>
             </div>
             <div class="bg-white p-6 rounded-lg shadow-md">
@@ -255,6 +257,7 @@
 
         let requisitionsCollection, itemsCollection, employeesCollection, stockLocationsCollection;
         let isLoggedIn = false;
+        let isFirestoreReady = false;
         let allRequisitionsDocs = [], allItemsDocs = [], allEmployeesDocs = [], allStockLocationsDocs = [];
 
         // Verifica se o usuário já estava logado na sessão
@@ -270,10 +273,15 @@
                 itemsCollection = collection(db, `/artifacts/${appId}/public/data/items`);
                 employeesCollection = collection(db, `/artifacts/${appId}/public/data/employees`);
                 stockLocationsCollection = collection(db, `/artifacts/${appId}/public/data/stockLocations`);
+                
+                isFirestoreReady = true;
+
                 listenToAllCollections();
                 updateUIForAuth(); // Garante que a UI reflita o estado de login no carregamento
             } catch (error) {
                 console.error("Erro na autenticação ou Firestore:", error);
+                isFirestoreReady = false;
+                updateUIForAuth();
                 [loadingRequisitions, loadingItems, loadingEmployees, loadingStock].forEach(l => l.classList.add('hidden'));
             }
         }
@@ -368,22 +376,29 @@
         };
         
         function updateUIForAuth() {
+            const canInteract = isLoggedIn && isFirestoreReady;
+            
             const tabs = [tabStock, tabItems, tabEmployees];
-            const buttons = [submitStockEntryBtn, submitItemBtn, submitEmployeeBtn, importExcelBtn];
+            const requisitionSubmitBtn = document.querySelector('#requisition-form button[type="submit"]');
+            const buttons = [submitStockEntryBtn, submitItemBtn, submitEmployeeBtn, importExcelBtn, requisitionSubmitBtn];
+
             if (isLoggedIn) {
                 loginLogoutBtn.textContent = 'Logout';
                 loginLogoutBtn.classList.replace('btn-primary', 'btn-secondary');
                 tabs.forEach(t => t.classList.remove('hidden'));
-                buttons.forEach(b => b.disabled = false);
             } else {
                 loginLogoutBtn.textContent = 'Login';
                 loginLogoutBtn.classList.replace('btn-secondary', 'btn-primary');
                 tabs.forEach(t => t.classList.add('hidden'));
-                buttons.forEach(b => b.disabled = true);
                 if (tabs.some(t => t.classList.contains('tab-active'))) {
                     handleTabClick(tabRequisitions, viewRequisitions, tabs, [viewStock, viewItems, viewEmployees]);
                 }
             }
+            
+            buttons.forEach(b => {
+                if (b) b.disabled = !canInteract;
+            });
+
             renderRequisitions();
             renderItems();
             renderEmployees();
@@ -456,6 +471,11 @@
         });
 
         async function handleExcelImport() {
+            if (!isFirestoreReady) {
+                importFeedback.textContent = 'A conexão com o banco de dados não está pronta. Tente novamente.';
+                importFeedback.className = 'text-sm mt-2 text-red-600';
+                return;
+            }
             const file = excelFileInput.files[0];
             if (!file) {
                 importFeedback.textContent = 'Selecione um arquivo.';
@@ -498,13 +518,13 @@
                         if (!code || !description) continue;
 
                         if (!existingCodes.has(code) && !newCodesInBatch.has(code)) {
-                            const newItemRef = doc(itemsCollection);
+                            const newItemRef = doc(collection(itemsCollection));
                             batch.set(newItemRef, { code, description });
                             newCodesInBatch.add(code);
                         }
 
                         if (address && quantity > 0) {
-                            const newLocationRef = doc(stockLocationsCollection);
+                            const newLocationRef = doc(collection(stockLocationsCollection));
                             batch.set(newLocationRef, { itemCode: code, address, quantity });
                         }
                     }
