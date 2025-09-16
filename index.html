@@ -33,7 +33,7 @@
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
             width: 90%; max-width: 500px;
         }
-        .btn-primary { background-color: #2563eb; color: white; transition: background-color 0.3s; }
+        .btn-primary { background-color: #2563eb; color: white; transition: background-color: 0.3s; }
         .btn-primary:hover { background-color: #1d4ed8; }
         .btn-primary:disabled { background-color: #9ca3af; cursor: not-allowed; }
         .btn-secondary { background-color: #6b7280; color: white; transition: background-color: 0.3s; }
@@ -405,8 +405,11 @@
                 });
             } else {
                  [...document.querySelectorAll('input, select, button, textarea')].forEach(el => {
-                    if (el.id !== 'login-logout-btn') el.disabled = false;
+                    if (el.id !== 'login-logout-btn' && !el.closest('form')) el.disabled = false;
                 });
+                if(!isLoggedIn){
+                    [...document.querySelectorAll('#view-items button, #view-employees button, #view-stock button')].forEach(b => b.disabled = true);
+                }
             }
             
             renderRequisitions();
@@ -526,13 +529,13 @@
                         const quantity = row[qtyKey] ? Number(row[qtyKey]) : null;
 
                         if (!existingCodes.has(code) && !newCodesInBatch.has(code)) {
-                            const newItemRef = doc(itemsCollection);
+                            const newItemRef = doc(collection(db, itemsCollection.path));
                             batch.set(newItemRef, { code, description });
                             newCodesInBatch.add(code);
                         }
 
                         if (address && quantity > 0) {
-                            const newLocationRef = doc(stockLocationsCollection);
+                            const newLocationRef = doc(collection(db, stockLocationsCollection.path));
                             batch.set(newLocationRef, { itemCode: code, address, quantity });
                         }
                     }
@@ -741,5 +744,4 @@
     </script>
 </body>
 </html>
-
 
