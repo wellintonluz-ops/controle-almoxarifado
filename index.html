@@ -118,6 +118,7 @@
                                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Código</th>
                                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
                                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Endereço</th>
+                                        <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Estoque Seg.</th>
                                         <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Quantidade</th>
                                     </tr>
                                 </thead>
@@ -398,7 +399,7 @@
                     stockClass = 'bg-yellow-100 hover:bg-yellow-200';
                 }
                 
-                stockListBody.innerHTML += `<tr class="${stockClass}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${locData.itemCode}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${description}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${locData.address}</td><td class="px-6 py-4 whitespace-nowrap text-center text-lg font-bold">${locData.quantity}</td></tr>`;
+                stockListBody.innerHTML += `<tr class="${stockClass}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${locData.itemCode}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${description}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${locData.address}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-700">${safetyStock}</td><td class="px-6 py-4 whitespace-nowrap text-center text-lg font-bold">${locData.quantity}</td></tr>`;
             });
         };
         
