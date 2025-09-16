@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -71,12 +72,39 @@
         <!-- Abas de Navegação -->
         <div class="border-b border-gray-200 mb-8">
             <nav class="flex flex-wrap space-x-4" aria-label="Tabs">
+                <button id="tab-dashboard" class="tab hidden">Dashboard</button>
                 <button id="tab-requisitions" class="tab tab-active">Requisições</button>
                 <button id="tab-stock" class="tab hidden">Estoque</button>
                 <button id="tab-items" class="tab hidden">Cadastro de Itens</button>
                 <button id="tab-employees" class="tab hidden">Cadastro de Funcionários</button>
             </nav>
         </div>
+        
+        <!-- Conteúdo da Aba Dashboard -->
+        <div id="view-dashboard" class="hidden">
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h2 class="text-xl font-semibold mb-4">Dashboard de Consumo</h2>
+                <div class="flex flex-col md:flex-row md:space-x-4 mb-6">
+                    <div class="flex-1 mb-4 md:mb-0">
+                        <label for="dashboard-period" class="block text-sm font-medium text-gray-700">Período</label>
+                        <select id="dashboard-period" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                            <option value="monthly">Este Mês</option>
+                            <option value="weekly">Últimos 7 dias</option>
+                        </select>
+                    </div>
+                    <div class="flex-1">
+                        <label for="dashboard-requester" class="block text-sm font-medium text-gray-700">Solicitante</label>
+                        <select id="dashboard-requester" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                            <option value="all">Todos</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <canvas id="consumption-chart"></canvas>
+                </div>
+            </div>
+        </div>
+
 
         <!-- Conteúdo da Aba Requisições -->
         <div id="view-requisitions">
@@ -284,7 +312,9 @@
         const auth = getAuth(app);
         
         const loginLogoutBtn = document.getElementById('login-logout-btn');
+        const tabDashboard = document.getElementById('tab-dashboard');
         const tabRequisitions = document.getElementById('tab-requisitions'), tabStock = document.getElementById('tab-stock'), tabItems = document.getElementById('tab-items'), tabEmployees = document.getElementById('tab-employees');
+        const viewDashboard = document.getElementById('view-dashboard');
         const viewRequisitions = document.getElementById('view-requisitions'), viewStock = document.getElementById('view-stock'), viewItems = document.getElementById('view-items'), viewEmployees = document.getElementById('view-employees');
         const requisitionForm = document.getElementById('requisition-form'), requisitionsListBody = document.getElementById('requisitions-list'), loadingRequisitions = document.getElementById('loading-requisitions'), noRequisitionsMessage = document.getElementById('no-requisitions'), filterStatus = document.getElementById('filter-status'), filterRequester = document.getElementById('filter-requester'), requesterSelect = document.getElementById('requester-select'), departmentInput = document.getElementById('department'), itemSelect = document.getElementById('item-select'), selectedItemCodeInput = document.getElementById('selected-item-code');
         const itemForm = document.getElementById('item-form'), itemsListBody = document.getElementById('items-list'), loadingItems = document.getElementById('loading-items'), noItemsMessage = document.getElementById('no-items'), submitItemBtn = document.getElementById('submit-item-btn'), excelFileInput = document.getElementById('excel-file-input'), importExcelBtn = document.getElementById('import-excel-btn'), importFeedback = document.getElementById('import-feedback');
@@ -294,12 +324,17 @@
         const loadingStock = document.getElementById('loading-stock'), stockListBody = document.getElementById('stock-list'), noStockItems = document.getElementById('no-stock-items'), stockEntryForm = document.getElementById('stock-entry-form'), stockItemSelect = document.getElementById('stock-item-select'), submitStockEntryBtn = document.getElementById('submit-stock-entry-btn');
         const locationSelectModal = document.getElementById('location-select-modal'), locationsList = document.getElementById('locations-list'), locationSelectError = document.getElementById('location-select-error'), confirmLocationSelectionBtn = document.getElementById('confirm-location-selection'), cancelLocationSelectionBtn = document.getElementById('cancel-location-selection'), modalLocationReqId = document.getElementById('modal-location-req-id');
         const editItemModal = document.getElementById('edit-item-modal'), editItemForm = document.getElementById('edit-item-form'), cancelEditItemBtn = document.getElementById('cancel-edit-item');
+        const dashboardPeriodSelect = document.getElementById('dashboard-period');
+        const dashboardRequesterSelect = document.getElementById('dashboard-requester');
+        const consumptionChartCanvas = document.getElementById('consumption-chart');
 
 
         let requisitionsCollection, itemsCollection, employeesCollection, stockLocationsCollection;
         let isLoggedIn = false;
         let isFirestoreReady = false;
         let allRequisitionsDocs = [], allItemsDocs = [], allEmployeesDocs = [], allStockLocationsDocs = [];
+        let consumptionChart = null;
+
 
         // Verifica se o usuário já estava logado na sessão
         if (sessionStorage.getItem('isUserLoggedIn') === 'true') {
@@ -329,7 +364,7 @@
         }
         
         function listenToAllCollections() {
-            loadingRequisitions.classList.remove('hidden'); onSnapshot(query(requisitionsCollection), s => { allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0)); renderRequisitions(); loadingRequisitions.classList.add('hidden'); }); 
+            loadingRequisitions.classList.remove('hidden'); onSnapshot(query(requisitionsCollection), s => { allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0)); renderRequisitions(); renderDashboard(); loadingRequisitions.classList.add('hidden'); }); 
             loadingEmployees.classList.remove('hidden'); onSnapshot(query(employeesCollection), s => { allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name)); renderEmployees(); populateSelects(); loadingEmployees.classList.add('hidden'); }); 
             
             loadingItems.classList.remove('hidden');
@@ -429,20 +464,25 @@
                 });
                 select.value = currentVal;
             });
+
             const currentReq = requesterSelect.value;
+            const currentDashReq = dashboardRequesterSelect.value;
             requesterSelect.innerHTML = '<option value="">Selecione um funcionário...</option>';
+            dashboardRequesterSelect.innerHTML = '<option value="all">Todos</option>';
             allEmployeesDocs.forEach(doc => {
                 const data = doc.data();
                 requesterSelect.innerHTML += `<option value="${data.name}" data-department="${data.department}">${data.name}</option>`;
+                dashboardRequesterSelect.innerHTML += `<option value="${data.name}">${data.name}</option>`;
             });
             requesterSelect.value = currentReq;
+            dashboardRequesterSelect.value = currentDashReq;
         };
         
         function updateUIForAuth() {
             const isReady = isFirestoreReady;
             const isAdmin = isLoggedIn;
 
-            const tabs = [tabStock, tabItems, tabEmployees];
+            const tabs = [tabDashboard, tabStock, tabItems, tabEmployees];
             if (isAdmin) {
                 loginLogoutBtn.textContent = 'Logout';
                 loginLogoutBtn.classList.replace('btn-primary', 'btn-secondary');
@@ -452,7 +492,7 @@
                 loginLogoutBtn.classList.replace('btn-secondary', 'btn-primary');
                 tabs.forEach(t => t.classList.add('hidden'));
                 if (tabs.some(t => t.classList.contains('tab-active'))) {
-                    handleTabClick(tabRequisitions, viewRequisitions, tabs, [viewStock, viewItems, viewEmployees]);
+                    handleTabClick(tabRequisitions, viewRequisitions, [tabDashboard, ...tabs], [viewDashboard, viewStock, viewItems, viewEmployees]);
                 }
             }
             
@@ -470,6 +510,7 @@
             renderItems();
             renderEmployees();
             renderStock();
+            renderDashboard();
         }
 
         requisitionForm.addEventListener('submit', async (e) => {
@@ -781,6 +822,93 @@
             }
         }
         
+        function renderDashboard() {
+            if (!isFirestoreReady) return;
+
+            const period = dashboardPeriodSelect.value;
+            const requester = dashboardRequesterSelect.value;
+
+            const now = new Date();
+            let startDate;
+
+            if (period === 'weekly') {
+                startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+            } else { // monthly
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            }
+
+            let filteredReqs = allRequisitionsDocs.filter(doc => {
+                const data = doc.data();
+                const reqDate = data.statusUpdatedAt?.toDate();
+                return data.status === 'Entregue' && reqDate && reqDate >= startDate;
+            });
+
+            if (requester !== 'all') {
+                filteredReqs = filteredReqs.filter(doc => doc.data().requester === requester);
+            }
+
+            const consumptionData = filteredReqs.reduce((acc, doc) => {
+                const { itemDescription, quantity } = doc.data();
+                acc[itemDescription] = (acc[itemDescription] || 0) + quantity;
+                return acc;
+            }, {});
+
+            const labels = Object.keys(consumptionData);
+            const data = Object.values(consumptionData);
+            
+            const totalConsumed = data.reduce((sum, val) => sum + val, 0);
+            const averageConsumption = labels.length > 0 ? totalConsumed / labels.length : 0;
+
+
+            if (consumptionChart) {
+                consumptionChart.destroy();
+            }
+
+            consumptionChart = new Chart(consumptionChartCanvas, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: 'Consumo',
+                            data: data,
+                            backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 1
+                        },
+                        {
+                            type: 'line',
+                            label: 'Média de Consumo',
+                            data: Array(labels.length).fill(averageConsumption.toFixed(2)),
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 2,
+                            fill: false,
+                            pointRadius: 0
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Quantidade Consumida'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Consumo de Itens'
+                        }
+                    }
+                }
+            });
+        }
+
         loginLogoutBtn.addEventListener('click', () => {
             if (isLoggedIn) {
                 isLoggedIn = false;
@@ -799,8 +927,8 @@
             inactiveViews.forEach(v => v.classList.add('hidden'));
             inactiveTabs.forEach(t => t.classList.remove('tab-active'));
         }
-        const allTabs = [tabRequisitions, tabStock, tabItems, tabEmployees];
-        const allViews = [viewRequisitions, viewStock, viewItems, viewEmployees];
+        const allTabs = [tabDashboard, tabRequisitions, tabStock, tabItems, tabEmployees];
+        const allViews = [viewDashboard, viewRequisitions, viewStock, viewItems, viewEmployees];
         allTabs.forEach((tab, index) => {
             tab.addEventListener('click', () => handleTabClick(tab, allViews[index], allTabs.filter(t => t !== tab), allViews.filter(v => v !== allViews[index])));
         });
@@ -831,6 +959,9 @@
             const opt = requesterSelect.options[requesterSelect.selectedIndex];
             departmentInput.value = (opt && opt.value) ? opt.dataset.department : '';
         });
+        
+        dashboardPeriodSelect.addEventListener('change', renderDashboard);
+        dashboardRequesterSelect.addEventListener('change', renderDashboard);
 
         setupAuthAndFirestore();
     </script>
