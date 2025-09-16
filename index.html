@@ -52,7 +52,6 @@
             border-bottom: 2px solid transparent; transition: all 0.3s;
         }
         .tab-active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
-        .stock-low { background-color: #fef9c3; } /* Amarelo claro para estoque baixo */
     </style>
 </head>
 <body class="antialiased text-gray-800">
@@ -162,15 +161,16 @@
                 <h2 class="text-xl font-semibold mb-4">Cadastrar Novo Item</h2>
                 <div class="border-t border-b border-gray-200 py-6 my-6">
                      <h3 class="text-lg font-medium text-gray-800 mb-2">Importar em Lote (Excel)</h3>
-                     <p class="text-sm text-gray-500 mb-4">Selecione um arquivo .xlsx/.xls com as colunas "Código", "Descrição", "Endereço" e "Quantidade".</p>
+                     <p class="text-sm text-gray-500 mb-4">Selecione um arquivo .xlsx/.xls com as colunas "Código", "Descrição", "Estoque de Segurança", "Endereço" e "Quantidade".</p>
                      <div class="flex items-center space-x-4"><input type="file" id="excel-file-input" accept=".xlsx, .xls" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" /><button id="import-excel-btn" class="btn-secondary font-semibold py-2 px-4 rounded-md shadow-sm whitespace-nowrap" disabled>Importar</button></div>
                      <p id="import-feedback" class="text-sm mt-2"></p>
                 </div>
                 <h3 class="text-lg font-medium text-gray-800 mb-4">Cadastro Manual</h3>
-                <form id="item-form" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <form id="item-form" class="grid grid-cols-1 md:grid-cols-4 gap-6">
                     <div class="md:col-span-1"><label for="item-code" class="block text-sm font-medium text-gray-700">Código</label><input type="text" id="item-code" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
                     <div class="md:col-span-2"><label for="item-description" class="block text-sm font-medium text-gray-700">Descrição</label><input type="text" id="item-description" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
-                    <div class="md:col-span-3 text-right"><button type="submit" id="submit-item-btn" class="btn-primary font-semibold py-2 px-6 rounded-md shadow-sm" disabled>Salvar Item</button></div>
+                    <div class="md:col-span-1"><label for="item-safety-stock" class="block text-sm font-medium text-gray-700">Estoque Seg.</label><input type="number" id="item-safety-stock" min="0" value="0" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
+                    <div class="md:col-span-4 text-right"><button type="submit" id="submit-item-btn" class="btn-primary font-semibold py-2 px-6 rounded-md shadow-sm" disabled>Salvar Item</button></div>
                 </form>
             </div>
             <div class="bg-white p-6 rounded-lg shadow-md">
@@ -181,6 +181,7 @@
                             <tr>
                                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Código</th>
                                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
+                                <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Estoque Seg.</th>
                                 <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Estoque Total</th>
                                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
                             </tr>
@@ -282,10 +283,10 @@
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) { await signInWithCustomToken(auth, __initial_auth_token); } 
                 else { await signInAnonymously(auth); }
-                requisitionsCollection = collection(db, `/artifacts/${appId}/public/data/requisitions`);
-                itemsCollection = collection(db, `/artifacts/${appId}/public/data/items`);
-                employeesCollection = collection(db, `/artifacts/${appId}/public/data/employees`);
-                stockLocationsCollection = collection(db, `/artifacts/${appId}/public/data/stockLocations`);
+                requisitionsCollection = collection(db, `requisitions`);
+                itemsCollection = collection(db, `items`);
+                employeesCollection = collection(db, `employees`);
+                stockLocationsCollection = collection(db, `stockLocations`);
                 
                 isFirestoreReady = true;
 
@@ -335,8 +336,16 @@
                 const totalStock = allStockLocationsDocs
                     .filter(loc => loc.data().itemCode === itemData.code)
                     .reduce((sum, loc) => sum + loc.data().quantity, 0);
+                
+                const safetyStock = itemData.safetyStock || 0;
+                let stockClass = '';
+                if (totalStock <= safetyStock) {
+                    stockClass = 'bg-red-100 hover:bg-red-200';
+                } else if (totalStock <= safetyStock * 1.25) {
+                    stockClass = 'bg-yellow-100 hover:bg-yellow-200';
+                }
 
-                itemsListBody.innerHTML += `<tr class="hover:bg-gray-50 ${totalStock <= 5 ? 'stock-low' : ''}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${itemData.code}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemData.description}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm font-semibold ${totalStock <= 5 ? 'text-red-600' : 'text-gray-700'}">${totalStock}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${isLoggedIn ? `<button data-id="${doc.id}" class="delete-item-btn text-red-600 hover:text-red-900">Excluir</button>`: ''}</td></tr>`;
+                itemsListBody.innerHTML += `<tr class="${stockClass}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${itemData.code}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemData.description}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">${safetyStock}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm font-semibold">${totalStock}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${isLoggedIn ? `<button data-id="${doc.id}" class="delete-item-btn text-red-600 hover:text-red-900">Excluir</button>`: ''}</td></tr>`;
             });
             document.querySelectorAll('.delete-item-btn').forEach(b => b.addEventListener('click', async (e) => { if (confirm('Excluir este item e todos os seus registros de estoque?')) await deleteDoc(doc(itemsCollection, e.target.dataset.id)); }));
         };
@@ -348,8 +357,20 @@
                 const locData = locDoc.data();
                 const item = allItemsDocs.find(itemDoc => itemDoc.data().code === locData.itemCode);
                 const description = item ? item.data().description : "Item não encontrado";
+                const safetyStock = item ? (item.data().safetyStock || 0) : 0;
+
+                const totalStock = allStockLocationsDocs
+                    .filter(loc => loc.data().itemCode === locData.itemCode)
+                    .reduce((sum, loc) => sum + loc.data().quantity, 0);
+
+                let stockClass = '';
+                if (totalStock <= safetyStock) {
+                    stockClass = 'bg-red-100 hover:bg-red-200';
+                } else if (totalStock <= safetyStock * 1.25) {
+                    stockClass = 'bg-yellow-100 hover:bg-yellow-200';
+                }
                 
-                stockListBody.innerHTML += `<tr class="hover:bg-gray-50 ${locData.quantity <= 5 ? 'stock-low' : ''}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${locData.itemCode}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${description}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${locData.address}</td><td class="px-6 py-4 whitespace-nowrap text-center text-lg font-bold ${locData.quantity <= 5 ? 'text-red-600' : 'text-gray-800'}">${locData.quantity}</td></tr>`;
+                stockListBody.innerHTML += `<tr class="${stockClass}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${locData.itemCode}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${description}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${locData.address}</td><td class="px-6 py-4 whitespace-nowrap text-center text-lg font-bold">${locData.quantity}</td></tr>`;
             });
         };
         
@@ -444,8 +465,9 @@
             e.preventDefault(); 
             if (!isLoggedIn) return; 
             await addDoc(itemsCollection, { 
-                code: itemForm['item-code'].value, 
-                description: itemForm['item-description'].value
+                code: document.getElementById('item-code').value, 
+                description: document.getElementById('item-description').value,
+                safetyStock: Number(document.getElementById('item-safety-stock').value) || 0
             }); 
             itemForm.reset(); 
         });
@@ -524,17 +546,19 @@
                             continue;
                         }
 
+                        const safetyStockKey = Object.keys(row).find(k => k.toLowerCase().replace(/\s+/g, '') === 'estoquedesegurança' || k.toLowerCase().replace(/\s+/g, '') === 'estoqueseg.');
                         const addressKey = Object.keys(row).find(k => k.toLowerCase() === 'endereço' || k.toLowerCase() === 'endereco');
                         const qtyKey = Object.keys(row).find(k => k.toLowerCase() === 'quantidade');
 
                         const code = String(row[codeKey]).trim();
                         const description = String(row[descKey]).trim();
+                        const safetyStock = row[safetyStockKey] ? Number(row[safetyStockKey]) : 0;
                         const address = row[addressKey] ? String(row[addressKey]).trim() : null;
                         const quantity = row[qtyKey] ? Number(row[qtyKey]) : null;
 
                         if (!existingCodes.has(code) && !newCodesInBatch.has(code)) {
                             const newItemRef = doc(itemsCollection);
-                            batch.set(newItemRef, { code, description });
+                            batch.set(newItemRef, { code, description, safetyStock });
                             newCodesInBatch.add(code);
                         }
 
@@ -748,6 +772,4 @@
     </script>
 </body>
 </html>
-
-
 
