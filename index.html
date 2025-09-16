@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controle de Almoxarifado e Estoque</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .status-pendente { background-color: #fef3c7; color: #92400e; }
+        .status-rejeitado { background-color: #fee2e2; color: #991b1b; }
+        .status-entregue { background-color: #dbeafe; color: #1e40af; }
+        .modal-backdrop {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex; justify-content: center; align-items: center; z-index: 50;
+        }
+        .modal-content {
+            background-color: white; padding: 2rem; border-radius: 0.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            width: 90%; max-width: 500px;
+        }
+        .btn-primary { background-color: #2563eb; color: white; transition: background-color: 0.3s; }
+        .btn-primary:hover { background-color: #1d4ed8; }
+        .btn-secondary { background-color: #6b7280; color: white; transition: background-color: 0.3s; }
+        .btn-secondary:hover { background-color: #4b5563; }
+        .btn-danger { background-color: #dc2626; color: white; transition: background-color: 0.3s; }
+        .btn-danger:hover { background-color: #b91c1c; }
+        .loader {
+            border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%;
+            width: 40px; height: 40px; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .hidden { display: none; }
+        .tab {
+            cursor: pointer; padding: 0.75rem 1.5rem;
+            border-bottom: 2px solid transparent; transition: all 0.3s;
+        }
+        .tab-active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
+        .stock-low { background-color: #fef9c3; } /* Amarelo claro para estoque baixo */
+    </style>
+</head>
+<body class="antialiased text-gray-800">
+
+    <div id="app" class="container mx-auto p-4 md:p-8 max-w-7xl relative">
+
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold text-gray-900">Controle de Almoxarifado e Estoque</h1>
+            <p class="text-gray-600 mt-1">Gerencie requisições, cadastros e o estoque de forma integrada.</p>
+        </header>
+
+        <div class="absolute top-4 right-4 md:top-8 md:right-8">
+            <button id="login-logout-btn" class="btn-primary font-semibold py-2 px-4 rounded-md shadow-sm">Login</button>
+        </div>
+
+        <!-- Abas de Navegação -->
+        <div class="border-b border-gray-200 mb-8">
+            <nav class="flex flex-wrap space-x-4" aria-label="Tabs">
+                <button id="tab-requisitions" class="tab tab-active">Requisições</button>
+                <button id="tab-stock" class="tab hidden">Estoque</button>
+                <button id="tab-items" class="tab hidden">Cadastro de Itens</button>
+                <button id="tab-employees" class="tab hidden">Cadastro de Funcionários</button>
+            </nav>
+        </div>
+
+        <!-- Conteúdo da Aba Requisições -->
+        <div id="view-requisitions">
+            <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                <h2 class="text-xl font-semibold mb-4">Criar Nova Requisição</h2>
+                <form id="requisition-form" class="grid grid-cols-1 md:grid-cols-6 gap-6">
+                    <div class="md:col-span-3"><label for="requester-select" class="block text-sm font-medium text-gray-700">Solicitante</label><select id="requester-select" name="requester" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"><option value="">Selecione um funcionário...</option></select></div>
+                    <div class="md:col-span-3"><label for="department" class="block text-sm font-medium text-gray-700">Departamento</label><input type="text" id="department" name="department" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 focus:outline-none sm:text-sm"></div>
+                    <div class="md:col-span-3"><label for="item-select" class="block text-sm font-medium text-gray-700">Item Solicitado</label><select id="item-select" name="item-select" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"><option value="">Selecione um item...</option></select></div>
+                    <div class="md:col-span-2"><label for="selected-item-code" class="block text-sm font-medium text-gray-700">Código do Item</label><input type="text" id="selected-item-code" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 focus:outline-none sm:text-sm"></div>
+                    <div class="md:col-span-1"><label for="quantity" class="block text-sm font-medium text-gray-700">Quantidade</label><input type="number" id="quantity" name="quantity" min="1" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
+                    <div class="md:col-span-6"><label for="justification" class="block text-sm font-medium text-gray-700">Justificativa</label><textarea id="justification" name="justification" rows="3" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></textarea></div>
+                    <div class="md:col-span-6 text-right"><button type="submit" class="btn-primary font-semibold py-2 px-6 rounded-md shadow-sm">Enviar Requisição</button></div>
+                </form>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <div class="flex justify-between items-center mb-4"><h2 class="text-xl font-semibold">Lista de Requisições</h2><div id="loading-requisitions" class="loader"></div></div>
+                <div class="flex flex-col md:flex-row md:space-x-4 mb-4">
+                    <div class="flex-1"><label for="filter-status" class="block text-sm font-medium text-gray-700">Filtrar por Status</label><select id="filter-status" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"><option>Todos</option><option>Pendente</option><option>Rejeitado</option><option>Entregue</option></select></div>
+                    <div class="flex-1 mt-4 md:mt-0"><label for="filter-requester" class="block text-sm font-medium text-gray-700">Filtrar por Solicitante</label><input type="text" id="filter-requester" placeholder="Digite o nome..." class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
+                </div>
+                <div class="overflow-x-auto"><table class="min-w-full divide-y divide-gray-200"><thead class="bg-gray-50"><tr><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Solicitante</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qtd.</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Última Atualização</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th></tr></thead><tbody id="requisitions-list" class="bg-white divide-y divide-gray-200"></tbody></table><p id="no-requisitions" class="text-center text-gray-500 py-8 hidden">Nenhuma requisição encontrada.</p></div>
+            </div>
+        </div>
+
+        <!-- Conteúdo da Aba Estoque -->
+        <div id="view-stock" class="hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div class="lg:col-span-2">
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="text-xl font-semibold">Painel de Estoque por Endereço</h2>
+                            <div id="loading-stock" class="loader hidden"></div>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Código</th>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
+                                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Endereço</th>
+                                        <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Quantidade</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="stock-list" class="bg-white divide-y divide-gray-200"></tbody>
+                            </table>
+                            <p id="no-stock-items" class="text-center text-gray-500 py-8 hidden">Nenhum item em estoque. Cadastre itens e endereços primeiro.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="lg:col-span-1">
+                     <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h2 class="text-xl font-semibold mb-4">Entrada Manual no Estoque</h2>
+                        <form id="stock-entry-form">
+                            <div class="mb-4">
+                                <label for="stock-item-select" class="block text-sm font-medium text-gray-700">Item</label>
+                                <select id="stock-item-select" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                                    <option value="">Selecione um item...</option>
+                                </select>
+                            </div>
+                            <div class="mb-4">
+                                <label for="stock-entry-address" class="block text-sm font-medium text-gray-700">Endereço</label>
+                                <input type="text" id="stock-entry-address" required placeholder="Ex: Corredor A, Prat. 2" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                            </div>
+                            <div class="mb-4">
+                                <label for="stock-entry-quantity" class="block text-sm font-medium text-gray-700">Quantidade a Adicionar</label>
+                                <input type="number" id="stock-entry-quantity" min="1" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                            </div>
+                            <div class="text-right">
+                                <button type="submit" id="submit-stock-entry-btn" class="w-full btn-primary font-semibold py-2 px-6 rounded-md shadow-sm" disabled>
+                                    Registrar Entrada
+                                </button>
+                            </div>
+                        </form>
+                     </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Conteúdo da Aba Cadastro de Itens -->
+        <div id="view-items" class="hidden">
+            <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                <h2 class="text-xl font-semibold mb-4">Cadastrar Novo Item</h2>
+                <div class="border-t border-b border-gray-200 py-6 my-6">
+                     <h3 class="text-lg font-medium text-gray-800 mb-2">Importar em Lote (Excel)</h3>
+                     <p class="text-sm text-gray-500 mb-4">Selecione um arquivo .xlsx/.xls com as colunas "Código", "Descrição", "Endereço" e "Quantidade".</p>
+                     <div class="flex items-center space-x-4"><input type="file" id="excel-file-input" accept=".xlsx, .xls" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" /><button id="import-excel-btn" class="btn-secondary font-semibold py-2 px-4 rounded-md shadow-sm whitespace-nowrap" disabled>Importar</button></div>
+                     <p id="import-feedback" class="text-sm mt-2"></p>
+                </div>
+                <h3 class="text-lg font-medium text-gray-800 mb-4">Cadastro Manual</h3>
+                <form id="item-form" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="md:col-span-1"><label for="item-code" class="block text-sm font-medium text-gray-700">Código</label><input type="text" id="item-code" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
+                    <div class="md:col-span-2"><label for="item-description" class="block text-sm font-medium text-gray-700">Descrição</label><input type="text" id="item-description" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
+                    <div class="md:col-span-3 text-right"><button type="submit" id="submit-item-btn" class="btn-primary font-semibold py-2 px-6 rounded-md shadow-sm" disabled>Salvar Item</button></div>
+                </form>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <div class="flex justify-between items-center mb-4"><h2 class="text-xl font-semibold">Itens Cadastrados (Visão Geral)</h2><div id="loading-items" class="loader hidden"></div></div>
+                 <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Código</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
+                                <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Estoque Total</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="items-list" class="bg-white divide-y divide-gray-200"></tbody>
+                    </table>
+                     <p id="no-items" class="text-center text-gray-500 py-8 hidden">Nenhum item encontrado.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Conteúdo da Aba Cadastro de Funcionários -->
+        <div id="view-employees" class="hidden">
+             <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+                <h2 class="text-xl font-semibold mb-4">Cadastrar Novo Funcionário</h2>
+                <form id="employee-form" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div><label for="employee-name" class="block text-sm font-medium text-gray-700">Nome do Funcionário</label><input type="text" id="employee-name" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
+                    <div><label for="employee-department" class="block text-sm font-medium text-gray-700">Departamento</label><input type="text" id="employee-department" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
+                    <div class="md:col-span-2 text-right"><button type="submit" id="submit-employee-btn" class="btn-primary font-semibold py-2 px-6 rounded-md shadow-sm" disabled>Salvar Funcionário</button></div>
+                </form>
+            </div>
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <div class="flex justify-between items-center mb-4"><h2 class="text-xl font-semibold">Funcionários Cadastrados</h2><div id="loading-employees" class="loader hidden"></div></div>
+                 <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200"><thead class="bg-gray-50"><tr><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nome</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Departamento</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th></tr></thead><tbody id="employees-list" class="bg-white divide-y divide-gray-200"></tbody></table>
+                     <p id="no-employees" class="text-center text-gray-500 py-8 hidden">Nenhum funcionário encontrado.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modais -->
+    <div id="login-modal" class="modal-backdrop hidden"><div class="modal-content"><h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">Acesso Restrito</h3><p class="text-sm text-gray-600 mb-4">Por favor, insira suas credenciais para gerenciar o sistema.</p><form id="login-form"><div class="mb-4"><label for="login-user" class="block text-sm font-medium text-gray-700">Login</label><input type="text" id="login-user" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div><div><label for="login-pass" class="block text-sm font-medium text-gray-700">Senha</label><input type="password" id="login-pass" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div><p id="login-error" class="text-sm text-red-600 mt-2 hidden">Login ou senha inválidos.</p><div class="mt-6 flex justify-end space-x-4"><button type="button" id="cancel-login" class="py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">Cancelar</button><button type="submit" class="btn-primary py-2 px-4 rounded-md shadow-sm text-sm font-medium">Entrar</button></div></form></div></div>
+    <div id="status-modal" class="modal-backdrop hidden"><div class="modal-content"><h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">Atualizar Status da Requisição</h3><div><label for="status-select" class="block text-sm font-medium text-gray-700">Novo Status</label><select id="status-select" name="status-select" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"><option>Pendente</option><option>Rejeitado</option><option>Entregue</option></select><input type="hidden" id="modal-requisition-id"><input type="hidden" id="modal-original-status"></div><div class="mt-6 flex justify-end space-x-4"><button type="button" id="cancel-update" class="py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">Cancelar</button><button type="button" id="confirm-update" class="btn-primary py-2 px-4 rounded-md shadow-sm text-sm font-medium">Salvar</button></div></div></div>
+    <div id="location-select-modal" class="modal-backdrop hidden">
+        <div class="modal-content">
+            <h3 class="text-lg font-medium leading-6 text-gray-900 mb-2">Selecionar Local de Saída</h3>
+            <p class="text-sm text-gray-600 mb-4">Selecione de qual endereço o item será retirado do estoque.</p>
+            <div id="locations-list" class="space-y-2 max-h-60 overflow-y-auto mb-6">
+                <!-- Locais serão populados via JS -->
+            </div>
+            <p id="location-select-error" class="text-sm text-red-600 mt-2 hidden">Por favor, selecione um local.</p>
+            <input type="hidden" id="modal-location-req-id">
+            <div class="mt-6 flex justify-end space-x-4">
+                <button type="button" id="cancel-location-selection" class="py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">Cancelar</button>
+                <button type="button" id="confirm-location-selection" class="btn-primary py-2 px-4 rounded-md shadow-sm text-sm font-medium">Confirmar Saída</button>
+            </div>
+        </div>
+    </div>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, where, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "DEFAULT_API_KEY", authDomain: "DEFAULT_AUTH_DOMAIN", projectId: "DEFAULT_PROJECT_ID" };
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        
+        const loginLogoutBtn = document.getElementById('login-logout-btn');
+        const tabRequisitions = document.getElementById('tab-requisitions'), tabStock = document.getElementById('tab-stock'), tabItems = document.getElementById('tab-items'), tabEmployees = document.getElementById('tab-employees');
+        const viewRequisitions = document.getElementById('view-requisitions'), viewStock = document.getElementById('view-stock'), viewItems = document.getElementById('view-items'), viewEmployees = document.getElementById('view-employees');
+        const requisitionForm = document.getElementById('requisition-form'), requisitionsListBody = document.getElementById('requisitions-list'), loadingRequisitions = document.getElementById('loading-requisitions'), noRequisitionsMessage = document.getElementById('no-requisitions'), filterStatus = document.getElementById('filter-status'), filterRequester = document.getElementById('filter-requester'), requesterSelect = document.getElementById('requester-select'), departmentInput = document.getElementById('department'), itemSelect = document.getElementById('item-select'), selectedItemCodeInput = document.getElementById('selected-item-code');
+        const itemForm = document.getElementById('item-form'), itemsListBody = document.getElementById('items-list'), loadingItems = document.getElementById('loading-items'), noItemsMessage = document.getElementById('no-items'), submitItemBtn = document.getElementById('submit-item-btn'), excelFileInput = document.getElementById('excel-file-input'), importExcelBtn = document.getElementById('import-excel-btn'), importFeedback = document.getElementById('import-feedback');
+        const employeeForm = document.getElementById('employee-form'), employeesListBody = document.getElementById('employees-list'), loadingEmployees = document.getElementById('loading-employees'), noEmployeesMessage = document.getElementById('no-employees'), submitEmployeeBtn = document.getElementById('submit-employee-btn');
+        const statusModal = document.getElementById('status-modal'), statusSelect = document.getElementById('status-select'), modalRequisitionId = document.getElementById('modal-requisition-id'), modalOriginalStatus = document.getElementById('modal-original-status'), cancelUpdateBtn = document.getElementById('cancel-update'), confirmUpdateBtn = document.getElementById('confirm-update');
+        const loginModal = document.getElementById('login-modal'), loginForm = document.getElementById('login-form'), cancelLoginBtn = document.getElementById('cancel-login'), loginError = document.getElementById('login-error');
+        const loadingStock = document.getElementById('loading-stock'), stockListBody = document.getElementById('stock-list'), noStockItems = document.getElementById('no-stock-items'), stockEntryForm = document.getElementById('stock-entry-form'), stockItemSelect = document.getElementById('stock-item-select'), submitStockEntryBtn = document.getElementById('submit-stock-entry-btn');
+        const locationSelectModal = document.getElementById('location-select-modal'), locationsList = document.getElementById('locations-list'), locationSelectError = document.getElementById('location-select-error'), confirmLocationSelectionBtn = document.getElementById('confirm-location-selection'), cancelLocationSelectionBtn = document.getElementById('cancel-location-selection'), modalLocationReqId = document.getElementById('modal-location-req-id');
+
+
+        let requisitionsCollection, itemsCollection, employeesCollection, stockLocationsCollection;
+        let isLoggedIn = false;
+        let allRequisitionsDocs = [], allItemsDocs = [], allEmployeesDocs = [], allStockLocationsDocs = [];
+
+        async function setupAuthAndFirestore() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) { await signInWithCustomToken(auth, __initial_auth_token); } 
+                else { await signInAnonymously(auth); }
+                requisitionsCollection = collection(db, `/artifacts/${appId}/public/data/requisitions`);
+                itemsCollection = collection(db, `/artifacts/${appId}/public/data/items`);
+                employeesCollection = collection(db, `/artifacts/${appId}/public/data/employees`);
+                stockLocationsCollection = collection(db, `/artifacts/${appId}/public/data/stockLocations`);
+                listenToAllCollections();
+            } catch (error) {
+                console.error("Erro na autenticação ou Firestore:", error);
+                [loadingRequisitions, loadingItems, loadingEmployees, loadingStock].forEach(l => l.classList.add('hidden'));
+            }
+        }
+        
+        function listenToAllCollections() {
+            loadingRequisitions.classList.remove('hidden'); onSnapshot(query(requisitionsCollection), s => { allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0)); renderRequisitions(); loadingRequisitions.classList.add('hidden'); }); 
+            loadingEmployees.classList.remove('hidden'); onSnapshot(query(employeesCollection), s => { allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name)); renderEmployees(); populateSelects(); loadingEmployees.classList.add('hidden'); }); 
+            
+            loadingItems.classList.remove('hidden');
+            onSnapshot(query(itemsCollection), s => { allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description)); renderItems(); populateSelects(); loadingItems.classList.add('hidden'); });
+            
+            loadingStock.classList.remove('hidden');
+            onSnapshot(query(stockLocationsCollection), s => { allStockLocationsDocs = s.docs.sort((a,b) => a.data().address.localeCompare(b.data().address)); renderStock(); renderItems(); loadingStock.classList.add('hidden'); });
+        }
+
+        const renderRequisitions = () => {
+            const statusFilter = filterStatus.value;
+            const requesterFilter = filterRequester.value.trim().toLowerCase();
+            requisitionsListBody.innerHTML = '';
+            let filteredDocs = allRequisitionsDocs.filter(doc => (statusFilter === 'Todos' || doc.data().status === statusFilter) && (!requesterFilter || doc.data().requester.toLowerCase().includes(requesterFilter)));
+            noRequisitionsMessage.classList.toggle('hidden', filteredDocs.length > 0);
+            filteredDocs.forEach(doc => {
+                const data = doc.data();
+                const id = doc.id;
+                const date = data.createdAt?.toDate().toLocaleDateString('pt-BR') || 'N/A';
+                const updatedAtText = data.statusUpdatedAt ? data.statusUpdatedAt.toDate().toLocaleString('pt-BR') : '-';
+                const itemDisplay = data.itemCode ? `[${data.itemCode}] - ${data.itemDescription}` : data.item;
+                requisitionsListBody.innerHTML += `<tr class="hover:bg-gray-50"><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${date}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${data.requester}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemDisplay}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${data.quantity}</td><td class="px-6 py-4 whitespace-nowrap"><span class="status-badge status-${data.status.toLowerCase()}">${data.status}</span></td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${updatedAtText}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium"><button data-id="${id}" data-status="${data.status}" class="update-status-btn ${!isLoggedIn ? 'text-gray-400 cursor-not-allowed' : 'text-blue-600 hover:text-blue-900'}" ${!isLoggedIn ? 'disabled' : ''}>Alterar</button></td></tr>`;
+            });
+            document.querySelectorAll('.update-status-btn:not([disabled])').forEach(b => b.addEventListener('click', (e) => openStatusModal(e.target)));
+        };
+
+        const renderItems = () => {
+            itemsListBody.innerHTML = '';
+            noItemsMessage.classList.toggle('hidden', allItemsDocs.length > 0);
+            allItemsDocs.forEach(doc => {
+                const itemData = doc.data();
+                const totalStock = allStockLocationsDocs
+                    .filter(loc => loc.data().itemCode === itemData.code)
+                    .reduce((sum, loc) => sum + loc.data().quantity, 0);
+
+                itemsListBody.innerHTML += `<tr class="hover:bg-gray-50 ${totalStock <= 5 ? 'stock-low' : ''}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${itemData.code}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemData.description}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm font-semibold ${totalStock <= 5 ? 'text-red-600' : 'text-gray-700'}">${totalStock}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${isLoggedIn ? `<button data-id="${doc.id}" class="delete-item-btn text-red-600 hover:text-red-900">Excluir</button>`: ''}</td></tr>`;
+            });
+            document.querySelectorAll('.delete-item-btn').forEach(b => b.addEventListener('click', async (e) => { if (confirm('Excluir este item e todos os seus registros de estoque?')) await deleteDoc(doc(itemsCollection, e.target.dataset.id)); }));
+        };
+
+        const renderStock = () => {
+            stockListBody.innerHTML = '';
+            noStockItems.classList.toggle('hidden', allStockLocationsDocs.length > 0);
+            allStockLocationsDocs.forEach(locDoc => {
+                const locData = locDoc.data();
+                const item = allItemsDocs.find(itemDoc => itemDoc.data().code === locData.itemCode);
+                const description = item ? item.data().description : "Item não encontrado";
+                
+                stockListBody.innerHTML += `<tr class="hover:bg-gray-50 ${locData.quantity <= 5 ? 'stock-low' : ''}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${locData.itemCode}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${description}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${locData.address}</td><td class="px-6 py-4 whitespace-nowrap text-center text-lg font-bold ${locData.quantity <= 5 ? 'text-red-600' : 'text-gray-800'}">${locData.quantity}</td></tr>`;
+            });
+        };
+        
+        const renderEmployees = () => {
+            employeesListBody.innerHTML = '';
+            noEmployeesMessage.classList.toggle('hidden', allEmployeesDocs.length > 0);
+            allEmployeesDocs.forEach(doc => {
+                const data = doc.data();
+                const id = doc.id;
+                employeesListBody.innerHTML += `<tr class="hover:bg-gray-50"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${data.name}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${data.department}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${isLoggedIn ? `<button data-id="${id}" class="delete-employee-btn text-red-600 hover:text-red-900">Excluir</button>` : ''}</td></tr>`;
+            });
+            document.querySelectorAll('.delete-employee-btn').forEach(b => b.addEventListener('click', async (e) => {
+                if (confirm('Tem certeza que deseja excluir este funcionário?')) {
+                    await deleteDoc(doc(employeesCollection, e.target.dataset.id));
+                }
+            }));
+        };
+        
+        const populateSelects = () => {
+            [itemSelect, stockItemSelect].forEach(select => {
+                const currentVal = select.value;
+                select.innerHTML = `<option value="">Selecione um item...</option>`;
+                allItemsDocs.forEach(doc => {
+                    const data = doc.data();
+                    const optionValue = JSON.stringify({ id: doc.id, code: data.code, description: data.description });
+                    select.innerHTML += `<option value='${optionValue}'>${data.description}</option>`;
+                });
+                select.value = currentVal;
+            });
+            const currentReq = requesterSelect.value;
+            requesterSelect.innerHTML = '<option value="">Selecione um funcionário...</option>';
+            allEmployeesDocs.forEach(doc => {
+                const data = doc.data();
+                requesterSelect.innerHTML += `<option value="${data.name}" data-department="${data.department}">${data.name}</option>`;
+            });
+            requesterSelect.value = currentReq;
+        };
+        
+        function updateUIForAuth() {
+            const tabs = [tabStock, tabItems, tabEmployees];
+            const buttons = [submitStockEntryBtn, submitItemBtn, submitEmployeeBtn, importExcelBtn];
+            if (isLoggedIn) {
+                loginLogoutBtn.textContent = 'Logout';
+                loginLogoutBtn.classList.replace('btn-primary', 'btn-secondary');
+                tabs.forEach(t => t.classList.remove('hidden'));
+                buttons.forEach(b => b.disabled = false);
+            } else {
+                loginLogoutBtn.textContent = 'Login';
+                loginLogoutBtn.classList.replace('btn-secondary', 'btn-primary');
+                tabs.forEach(t => t.classList.add('hidden'));
+                buttons.forEach(b => b.disabled = true);
+                if (tabs.some(t => t.classList.contains('tab-active'))) {
+                    handleTabClick(tabRequisitions, viewRequisitions, tabs, [viewStock, viewItems, viewEmployees]);
+                }
+            }
+            renderRequisitions();
+            renderItems();
+            renderEmployees();
+            renderStock();
+        }
+
+        requisitionForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const item = JSON.parse(itemSelect.value);
+            await addDoc(requisitionsCollection, {
+                requester: requesterSelect.value,
+                department: departmentInput.value,
+                itemCode: item.code,
+                itemDescription: item.description,
+                quantity: Number(requisitionForm.quantity.value),
+                justification: requisitionForm.justification.value,
+                status: 'Pendente',
+                createdAt: serverTimestamp()
+            });
+            requisitionForm.reset();
+            selectedItemCodeInput.value = '';
+            departmentInput.value = '';
+        });
+        
+        itemForm.addEventListener('submit', async (e) => { 
+            e.preventDefault(); 
+            if (!isLoggedIn) return; 
+            await addDoc(itemsCollection, { 
+                code: itemForm['item-code'].value, 
+                description: itemForm['item-description'].value
+            }); 
+            itemForm.reset(); 
+        });
+
+        employeeForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if(!isLoggedIn) return;
+            await addDoc(employeesCollection, {
+                name: employeeForm['employee-name'].value,
+                department: employeeForm['employee-department'].value
+            });
+            employeeForm.reset();
+        });
+        
+        stockEntryForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!isLoggedIn) return;
+            const itemData = JSON.parse(stockItemSelect.value);
+            const address = document.getElementById('stock-entry-address').value.trim();
+            const quantityToAdd = Number(document.getElementById('stock-entry-quantity').value);
+
+            const existingLocation = allStockLocationsDocs.find(doc => doc.data().itemCode === itemData.code && doc.data().address === address);
+            
+            try {
+                if (existingLocation) {
+                    const newQuantity = (existingLocation.data().quantity || 0) + quantityToAdd;
+                    await updateDoc(doc(stockLocationsCollection, existingLocation.id), { quantity: newQuantity });
+                } else {
+                    await addDoc(stockLocationsCollection, {
+                        itemCode: itemData.code,
+                        address: address,
+                        quantity: quantityToAdd
+                    });
+                }
+                stockEntryForm.reset();
+            } catch (error) {
+                console.error("Erro ao registrar entrada no estoque: ", error);
+                alert("Falha ao registrar entrada.");
+            }
+        });
+
+        async function handleExcelImport() {
+            const file = excelFileInput.files[0];
+            if (!file) {
+                importFeedback.textContent = 'Selecione um arquivo.';
+                importFeedback.className = 'text-sm mt-2 text-red-600';
+                return;
+            }
+            importFeedback.textContent = 'Processando...';
+            importFeedback.className = 'text-sm mt-2 text-blue-600';
+            importExcelBtn.disabled = true;
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const json = XLSX.utils.sheet_to_json(worksheet);
+                    if (json.length === 0) throw new Error("A planilha está vazia.");
+                    
+                    const batch = writeBatch(db);
+
+                    for (const row of json) {
+                        const codeKey = Object.keys(row).find(k => k.toLowerCase() === 'código' || k.toLowerCase() === 'codigo');
+                        const descKey = Object.keys(row).find(k => k.toLowerCase() === 'descrição' || k.toLowerCase() === 'descricao');
+                        const addressKey = Object.keys(row).find(k => k.toLowerCase() === 'endereço' || k.toLowerCase() === 'endereco');
+                        const qtyKey = Object.keys(row).find(k => k.toLowerCase() === 'quantidade');
+
+                        const code = row[codeKey] ? String(row[codeKey]).trim() : null;
+                        const description = row[descKey] ? String(row[descKey]).trim() : null;
+                        const address = row[addressKey] ? String(row[addressKey]).trim() : null;
+                        const quantity = row[qtyKey] ? Number(row[qtyKey]) : null;
+
+                        if (!code || !description) continue;
+
+                        let item = allItemsDocs.find(doc => doc.data().code === code);
+                        if (!item) {
+                            const newItemRef = doc(itemsCollection);
+                            batch.set(newItemRef, { code, description });
+                        }
+
+                        if (address && quantity > 0) {
+                            const newLocationRef = doc(stockLocationsCollection);
+                            batch.set(newLocationRef, { itemCode: code, address, quantity });
+                        }
+                    }
+                    
+                    await batch.commit();
+                    importFeedback.textContent = `${json.length} linhas processadas com sucesso!`;
+                    importFeedback.className = 'text-sm mt-2 text-green-600';
+                    excelFileInput.value = '';
+                } catch (error) {
+                    importFeedback.textContent = `Erro: ${error.message}`;
+                    importFeedback.className = 'text-sm mt-2 text-red-600';
+                } finally {
+                    if (isLoggedIn) importExcelBtn.disabled = false;
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        loginForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (loginForm['login-user'].value === 'tbx' && loginForm['login-pass'].value === 'tbx1') {
+                isLoggedIn = true;
+                loginForm.reset();
+                loginModal.classList.add('hidden');
+                updateUIForAuth();
+            } else {
+                loginError.classList.remove('hidden');
+            }
+        });
+        
+        function openStatusModal(target) {
+            modalRequisitionId.value = target.dataset.id;
+            statusSelect.value = target.dataset.status;
+            modalOriginalStatus.value = target.dataset.status;
+            statusModal.classList.remove('hidden');
+        }
+
+        async function handleStatusUpdate() {
+            const reqId = modalRequisitionId.value;
+            const newStatus = statusSelect.value;
+            const oldStatus = modalOriginalStatus.value;
+            if (newStatus === oldStatus) {
+                statusModal.classList.add('hidden');
+                return;
+            }
+
+            const reqDocData = allRequisitionsDocs.find(doc => doc.id === reqId)?.data();
+            if (!reqDocData) {
+                alert("Erro: Requisição não encontrada.");
+                return;
+            }
+
+            if (newStatus === 'Entregue' && oldStatus !== 'Entregue') {
+                const { itemCode, quantity } = reqDocData;
+                const suitableLocations = allStockLocationsDocs.filter(doc => doc.data().itemCode === itemCode && doc.data().quantity >= quantity);
+
+                if (suitableLocations.length === 0) {
+                    alert(`Estoque insuficiente para o item ${itemCode}. Não é possível marcar como "Entregue".`);
+                    return;
+                }
+
+                locationsList.innerHTML = '';
+                suitableLocations.forEach(loc => {
+                    const locData = loc.data();
+                    const radioId = `loc-${loc.id}`;
+                    locationsList.innerHTML += `
+                        <div class="p-2 border rounded-md hover:bg-gray-50">
+                            <input type="radio" name="stockLocation" value="${loc.id}" id="${radioId}" class="mr-2">
+                            <label for="${radioId}" class="cursor-pointer">
+                                <strong>Endereço:</strong> ${locData.address} <span class="text-gray-500">(Qtd: ${locData.quantity})</span>
+                            </label>
+                        </div>
+                    `;
+                });
+
+                modalLocationReqId.value = reqId;
+                locationSelectError.classList.add('hidden');
+                statusModal.classList.add('hidden');
+                locationSelectModal.classList.remove('hidden');
+                return;
+            }
+            
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const reqDocRef = doc(requisitionsCollection, reqId);
+                    const reqDoc = await transaction.get(reqDocRef);
+                    if (!reqDoc.exists()) throw "Requisição não encontrada!";
+
+                    const { stockLocationId, quantity } = reqDoc.data();
+                    let updateData = { status: newStatus, statusUpdatedAt: serverTimestamp() };
+
+                    if (newStatus !== 'Entregue' && oldStatus === 'Entregue') {
+                        if (!stockLocationId) throw "Não foi possível reverter a entrega: Localização de origem desconhecida.";
+                        
+                        const locationToUpdateRef = doc(stockLocationsCollection, stockLocationId);
+                        const locationDoc = await transaction.get(locationToUpdateRef);
+                        if (!locationDoc.exists()) throw "Localização de estoque da entrega anterior não encontrada.";
+
+                        const newQuantity = (locationDoc.data().quantity || 0) + quantity;
+                        transaction.update(locationToUpdateRef, { quantity: newQuantity });
+                        updateData.stockLocationId = null;
+                    }
+                    
+                    transaction.update(reqDocRef, updateData);
+                });
+                statusModal.classList.add('hidden');
+            } catch (error) {
+                console.error("Erro na transação de status: ", error);
+                alert(`Falha ao atualizar: ${error}`);
+            }
+        }
+
+        async function confirmDeliveryFromLocation() {
+            const selectedLocationRadio = document.querySelector('input[name="stockLocation"]:checked');
+            if (!selectedLocationRadio) {
+                locationSelectError.classList.remove('hidden');
+                return;
+            }
+            locationSelectError.classList.add('hidden');
+
+            const locationId = selectedLocationRadio.value;
+            const reqId = modalLocationReqId.value;
+            const reqDocRef = doc(requisitionsCollection, reqId);
+            const locationToUpdateRef = doc(stockLocationsCollection, locationId);
+
+            try {
+                await runTransaction(db, async (transaction) => {
+                    const reqDoc = await transaction.get(reqDocRef);
+                    if (!reqDoc.exists()) throw "Requisição não encontrada!";
+                    const { quantity } = reqDoc.data();
+
+                    const locationDoc = await transaction.get(locationToUpdateRef);
+                    if (!locationDoc.exists()) throw "Localização de estoque selecionada não existe mais.";
+                    
+                    const currentStock = locationDoc.data().quantity || 0;
+                    if (currentStock < quantity) throw `Estoque no local selecionado é insuficiente. Ação cancelada.`;
+
+                    const newQuantity = currentStock - quantity;
+                    transaction.update(locationToUpdateRef, { quantity: newQuantity });
+
+                    const updateData = { 
+                        status: 'Entregue', 
+                        statusUpdatedAt: serverTimestamp(), 
+                        stockLocationId: locationId 
+                    };
+                    transaction.update(reqDocRef, updateData);
+                });
+                locationSelectModal.classList.add('hidden');
+            } catch (error) {
+                console.error("Erro ao confirmar entrega: ", error);
+                alert(`Falha ao confirmar a entrega: ${error}`);
+            }
+        }
+        
+        loginLogoutBtn.addEventListener('click', () => {
+            if (isLoggedIn) {
+                isLoggedIn = false;
+                updateUIForAuth();
+            } else {
+                loginError.classList.add('hidden');
+                loginForm.reset();
+                loginModal.classList.remove('hidden');
+            }
+        });
+        
+        function handleTabClick(activeTab, activeView, inactiveTabs, inactiveViews) {
+            activeView.classList.remove('hidden');
+            activeTab.classList.add('tab-active');
+            inactiveViews.forEach(v => v.classList.add('hidden'));
+            inactiveTabs.forEach(t => t.classList.remove('tab-active'));
+        }
+        const allTabs = [tabRequisitions, tabStock, tabItems, tabEmployees];
+        const allViews = [viewRequisitions, viewStock, viewItems, viewEmployees];
+        allTabs.forEach((tab, index) => {
+            tab.addEventListener('click', () => handleTabClick(tab, allViews[index], allTabs.filter(t => t !== tab), allViews.filter(v => v !== allViews[index])));
+        });
+        
+        cancelLoginBtn.addEventListener('click', () => loginModal.classList.add('hidden'));
+        cancelUpdateBtn.addEventListener('click', () => statusModal.classList.add('hidden'));
+        confirmUpdateBtn.addEventListener('click', handleStatusUpdate);
+        cancelLocationSelectionBtn.addEventListener('click', () => locationSelectModal.classList.add('hidden'));
+        confirmLocationSelectionBtn.addEventListener('click', confirmDeliveryFromLocation);
+
+        filterStatus.addEventListener('change', renderRequisitions);
+        filterRequester.addEventListener('input', renderRequisitions);
+        importExcelBtn.addEventListener('click', handleExcelImport);
+        itemSelect.addEventListener('change', () => {
+            try {
+                if (itemSelect.value) {
+                    selectedItemCodeInput.value = JSON.parse(itemSelect.value).code;
+                } else {
+                    selectedItemCodeInput.value = '';
+                }
+            } catch (e) {
+                selectedItemCodeInput.value = '';
+            }
+        });
+        requesterSelect.addEventListener('change', () => {
+            const opt = requesterSelect.options[requesterSelect.selectedIndex];
+            departmentInput.value = (opt && opt.value) ? opt.dataset.department : '';
+        });
+
+        setupAuthAndFirestore();
+    </script>
+</body>
+</html>
+
