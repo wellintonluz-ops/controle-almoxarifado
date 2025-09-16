@@ -377,10 +377,10 @@
         
         function updateUIForAuth() {
             const isReady = isFirestoreReady;
-            const isAdminReady = isLoggedIn && isFirestoreReady;
+            const isAdmin = isLoggedIn;
 
             const tabs = [tabStock, tabItems, tabEmployees];
-            if (isLoggedIn) {
+            if (isAdmin) {
                 loginLogoutBtn.textContent = 'Logout';
                 loginLogoutBtn.classList.replace('btn-primary', 'btn-secondary');
                 tabs.forEach(t => t.classList.remove('hidden'));
@@ -392,9 +392,12 @@
                     handleTabClick(tabRequisitions, viewRequisitions, tabs, [viewStock, viewItems, viewEmployees]);
                 }
             }
+            
+            const isAdminReady = isAdmin && isReady;
 
             const requisitionSubmitBtn = document.querySelector('#requisition-form button[type="submit"]');
             if (requisitionSubmitBtn) requisitionSubmitBtn.disabled = !isReady;
+            
             if (submitStockEntryBtn) submitStockEntryBtn.disabled = !isAdminReady;
             if (submitItemBtn) submitItemBtn.disabled = !isAdminReady;
             if (submitEmployeeBtn) submitEmployeeBtn.disabled = !isAdminReady;
@@ -517,13 +520,13 @@
                         const quantity = row[qtyKey] ? Number(row[qtyKey]) : null;
 
                         if (!existingCodes.has(code) && !newCodesInBatch.has(code)) {
-                            const newItemRef = doc(itemsCollection);
+                            const newItemRef = doc(collection(db, itemsCollection.path));
                             batch.set(newItemRef, { code, description });
                             newCodesInBatch.add(code);
                         }
 
                         if (address && quantity > 0) {
-                            const newLocationRef = doc(stockLocationsCollection);
+                            const newLocationRef = doc(collection(db, stockLocationsCollection.path));
                             batch.set(newLocationRef, { itemCode: code, address, quantity });
                         }
                     }
