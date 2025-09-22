@@ -8,6 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -82,6 +83,108 @@
             border-color: #4f46e5;
             background-color: rgba(79, 70, 229, 0.05);
         }
+        .hidden-from-screen {
+            position: absolute;
+            left: -9999px;
+            top: auto;
+            width: 1px;
+            height: 1px;
+            overflow: hidden;
+        }
+        .label-preview-container {
+            width: 500px;
+            height: 150px;
+            border: 2px dashed #9ca3af;
+            padding: 10px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .product-code {
+            font-size: 1.1rem;
+            font-weight: bold;
+            text-align: center;
+        }
+
+        .product-description {
+            font-size: 1rem;
+            text-align: center;
+        }
+
+        #barcode {
+            width: 100%;
+            height: 60px;
+        }
+
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            #print-area, #print-area * {
+                visibility: visible;
+            }
+            #print-area {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+            }
+            .hidden-from-screen {
+                position: static;
+                width: auto;
+                height: auto;
+                overflow: visible;
+            }
+
+            .label-print {
+                padding: 2mm;
+                box-sizing: border-box;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-around;
+                align-items: center;
+                overflow: hidden;
+                page-break-after: always;
+            }
+
+            .replicated-content {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                width: 100%;
+                height: 3cm; /* Garante que cada bloco replicado tenha 3cm de altura */
+                justify-content: space-around;
+                box-sizing: border-box;
+                padding: 1mm 0;
+            }
+            
+            .replicated-content .product-code {
+                font-size: 12pt;
+                font-weight: bold;
+                text-align: center;
+            }
+            .replicated-content .product-description {
+                font-size: 10pt;
+                text-align: center;
+            }
+            .replicated-content .barcode-svg-print {
+                height: 1.2cm;
+                width: 8cm;
+            }
+            
+            /* Tamanhos Físicos da Etiqueta */
+            .label-print.size-10x3 { width: 10cm; height: 3cm; }
+            .label-print.size-10x8 { width: 10cm; height: 8cm; }
+            .label-print.size-15x10 { width: 15cm; height: 10cm; }
+            
+            /* Ajuste para o conteúdo não esticar na etiqueta de 15cm */
+            .label-print.size-15x10 .replicated-content {
+                max-width: 10cm;
+            }
+        }
     </style>
 </head>
 <body class="antialiased text-gray-800">
@@ -104,6 +207,7 @@
                 <button id="tab-requisitions" class="tab tab-active">Requisições</button>
                 <button id="tab-stock" class="tab hidden">Estoque</button>
                 <button id="tab-kanban" class="tab hidden">Kanban Equipamentos</button>
+                <button id="tab-labels" class="tab hidden">Gerar Etiquetas</button>
                 <button id="tab-items" class="tab hidden">Cadastro de Itens</button>
                 <button id="tab-employees" class="tab hidden">Cadastro de Funcionários</button>
             </nav>
@@ -255,6 +359,99 @@
             </main>
         </div>
         
+        <!-- Conteúdo da Aba Gerar Etiquetas -->
+        <div id="view-labels" class="hidden">
+            <div id="main-content" class="bg-white p-8 rounded-lg shadow-lg w-full max-w-2xl mx-auto">
+                <h1 class="text-2xl font-bold text-center text-gray-800 mb-2">Gerador de Etiquetas</h1>
+                <p class="text-center text-gray-600 mb-6">Gere uma etiqueta individualmente ou várias a partir de um arquivo.</p>
+                
+                <!-- Formulário de Entrada Individual -->
+                <div class="space-y-4">
+                    <div>
+                        <label for="productCodeInput" class="block text-sm font-medium text-gray-700">Código do Produto</label>
+                        <input type="text" id="productCodeInput" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="EX: 123456789">
+                    </div>
+                    <div>
+                        <label for="productDescriptionInput" class="block text-sm font-medium text-gray-700">Descrição do Produto</label>
+                        <input type="text" id="productDescriptionInput" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="EX: Camiseta de Algodão P Azul">
+                    </div>
+                </div>
+
+                <!-- Divisor -->
+                <div class="my-6 border-t border-gray-200"></div>
+
+                <!-- Configurações de Impressão -->
+                <div class="mt-4">
+                     <h2 class="text-lg font-semibold text-gray-800 mb-4">Configurações de Impressão</h2>
+                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                         <div>
+                             <label for="labelSizeSelect" class="block text-sm font-medium text-gray-700">Tamanho da Etiqueta</label>
+                             <select id="labelSizeSelect" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                                 <option value="size-10x3">10cm x 3cm (Padrão)</option>
+                                 <option value="size-10x8">10cm x 8cm (x2 replicado)</option>
+                                 <option value="size-15x10">15cm x 10cm (x3 replicado)</option>
+                             </select>
+                         </div>
+                         <div>
+                             <label for="labelQuantityInput" class="block text-sm font-medium text-gray-700">Folhas (Etiqueta Única)</label>
+                             <input type="number" id="labelQuantityInput" value="1" min="1" class="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm">
+                         </div>
+                     </div>
+                </div>
+
+
+                <!-- Botões de Ação Individual -->
+                <div class="mt-6 flex flex-col sm:flex-row gap-3">
+                    <button id="generateBtn" class="w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                        Gerar Pré-visualização
+                    </button>
+                    <button id="printBtn" class="w-full inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" disabled>
+                        Imprimir Etiqueta Única
+                    </button>
+                </div>
+                <div id="single-error" class="text-red-600 text-sm hidden mt-4 p-3 bg-red-50 rounded-md border border-red-200"></div>
+                
+                <!-- Divisor -->
+                <div class="my-8 border-t border-gray-300"></div>
+
+                <!-- Geração em Lote -->
+                <div class="mt-6">
+                    <h2 class="text-xl font-semibold text-center text-gray-800 mb-4">Impressão em Lote</h2>
+                    <p class="text-center text-gray-600 mb-4">Carregue um arquivo para gerar e imprimir várias etiquetas de uma vez. A impressão usará o tamanho selecionado acima.</p>
+                    <div class="space-y-2">
+                        <div>
+                            <label for="batchFileUpload" class="block text-sm font-medium text-gray-700">Carregar Arquivo (.csv ou .txt)</label>
+                            <input type="file" id="batchFileUpload" accept=".csv,.txt" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"/>
+                            <p class="mt-1 text-xs text-gray-500">Formato: uma etiqueta por linha como <code class="bg-gray-200 p-1 rounded">código,descrição</code>.</p>
+                        </div>
+                        <div id="batch-error" class="text-red-600 text-sm hidden p-3 bg-red-50 rounded-md border border-red-200"></div>
+                    </div>
+                </div>
+
+                <!-- Área de Pré-visualização Individual -->
+                <div id="preview-section" class="mt-8 hidden">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4 text-center">Pré-visualização da Etiqueta</h2>
+                    <div class="flex justify-center">
+                        <div id="label-preview" class="label-preview-container">
+                            <div id="product-code-preview" class="product-code"></div>
+                            <svg id="barcode"></svg>
+                            <div id="product-description-preview" class="product-description"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Informação sobre a leitura do código -->
+                <div id="info-section" class="mt-6 p-4 bg-blue-50 border-l-4 border-blue-400 rounded-r-lg hidden">
+                    <div class="flex">
+                        <div class="flex-shrink-0">
+                            <svg class="h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" /></svg>
+                        </div>
+                        <div class="ml-3"><p class="text-sm text-blue-700"><span class="font-bold">O que o leitor vai capturar?</span> Ao escanear, o leitor registrará apenas o <strong id="scan-info" class="font-bold">Código do Produto</strong>.</p></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Conteúdo da Aba Cadastro de Itens -->
         <div id="view-items" class="hidden">
             <div class="bg-white p-6 rounded-lg shadow-md mb-8">
@@ -396,6 +593,9 @@
             </form>
         </div>
     </div>
+
+    <!-- Área de Impressão de Etiquetas -->
+    <div id="print-area" class="hidden-from-screen"></div>
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
@@ -425,9 +625,11 @@
         const loginLogoutBtn = document.getElementById('login-logout-btn');
         const tabDashboard = document.getElementById('tab-dashboard');
         const tabKanban = document.getElementById('tab-kanban');
+        const tabLabels = document.getElementById('tab-labels');
         const tabRequisitions = document.getElementById('tab-requisitions'), tabStock = document.getElementById('tab-stock'), tabItems = document.getElementById('tab-items'), tabEmployees = document.getElementById('tab-employees');
         const viewDashboard = document.getElementById('view-dashboard');
         const viewKanban = document.getElementById('view-kanban');
+        const viewLabels = document.getElementById('view-labels');
         const viewRequisitions = document.getElementById('view-requisitions'), viewStock = document.getElementById('view-stock'), viewItems = document.getElementById('view-items'), viewEmployees = document.getElementById('view-employees');
         const requisitionForm = document.getElementById('requisition-form'), requisitionsListBody = document.getElementById('requisitions-list'), loadingRequisitions = document.getElementById('loading-requisitions'), noRequisitionsMessage = document.getElementById('no-requisitions'), filterStatus = document.getElementById('filter-status'), filterRequester = document.getElementById('filter-requester'), requesterSelect = document.getElementById('requester-select'), departmentInput = document.getElementById('department'), itemSelect = document.getElementById('item-select'), selectedItemCodeInput = document.getElementById('selected-item-code');
         const itemForm = document.getElementById('item-form'), itemsListBody = document.getElementById('items-list'), loadingItems = document.getElementById('loading-items'), noItemsMessage = document.getElementById('no-items'), submitItemBtn = document.getElementById('submit-item-btn'), excelFileInput = document.getElementById('excel-file-input'), importExcelBtn = document.getElementById('import-excel-btn'), importFeedback = document.getElementById('import-feedback');
@@ -450,6 +652,23 @@
         const checkoutForm = document.getElementById('checkout-form');
         const userSelect = document.getElementById('user-select');
         let draggedCardId = null;
+
+        // Label Elements
+        const generateBtn = document.getElementById('generateBtn');
+        const printBtn = document.getElementById('printBtn');
+        const productCodeInput = document.getElementById('productCodeInput');
+        const productDescriptionInput = document.getElementById('productDescriptionInput');
+        const batchFileUpload = document.getElementById('batchFileUpload');
+        const batchError = document.getElementById('batch-error');
+        const singleError = document.getElementById('single-error');
+        const labelSizeSelect = document.getElementById('labelSizeSelect');
+        const labelQuantityInput = document.getElementById('labelQuantityInput');
+        const previewSection = document.getElementById('preview-section');
+        const infoSection = document.getElementById('info-section');
+        const scanInfo = document.getElementById('scan-info');
+        const productCodePreview = document.getElementById('product-code-preview');
+        const productDescriptionPreview = document.getElementById('product-description-preview');
+        const printArea = document.getElementById('print-area');
 
 
         let requisitionsCollection, itemsCollection, employeesCollection, stockLocationsCollection, kanbanEquipmentsCollection;
@@ -614,7 +833,7 @@
             const isReady = isFirestoreReady;
             const isAdmin = isLoggedIn;
 
-            const tabs = [tabDashboard, tabStock, tabKanban, tabItems, tabEmployees];
+            const tabs = [tabDashboard, tabStock, tabKanban, tabLabels, tabItems, tabEmployees];
             if (isAdmin) {
                 loginLogoutBtn.textContent = 'Logout';
                 loginLogoutBtn.classList.replace('btn-primary', 'btn-secondary');
@@ -624,7 +843,7 @@
                 loginLogoutBtn.classList.replace('btn-secondary', 'btn-primary');
                 tabs.forEach(t => t.classList.add('hidden'));
                 if (tabs.some(t => t.classList.contains('tab-active'))) {
-                    handleTabClick(tabRequisitions, viewRequisitions, tabs, [viewDashboard, viewKanban, viewStock, viewItems, viewEmployees]);
+                    handleTabClick(tabRequisitions, viewRequisitions, tabs, [viewDashboard, viewKanban, viewLabels, viewStock, viewItems, viewEmployees]);
                 }
             }
             
@@ -1184,8 +1403,8 @@
             inactiveViews.forEach(v => v.classList.add('hidden'));
             inactiveTabs.forEach(t => t.classList.remove('tab-active'));
         }
-        const allTabs = [tabDashboard, tabRequisitions, tabStock, tabKanban, tabItems, tabEmployees];
-        const allViews = [viewDashboard, viewRequisitions, viewStock, viewKanban, viewItems, viewEmployees];
+        const allTabs = [tabDashboard, tabRequisitions, tabStock, tabKanban, tabLabels, tabItems, tabEmployees];
+        const allViews = [viewDashboard, viewRequisitions, viewStock, viewKanban, viewLabels, viewItems, viewEmployees];
         allTabs.forEach((tab, index) => {
             tab.addEventListener('click', () => handleTabClick(tab, allViews[index], allTabs.filter(t => t !== tab), allViews.filter(v => v !== allViews[index])));
         });
@@ -1269,6 +1488,132 @@
                 }
             }
         });
+
+
+        // LABEL LOGIC
+        generateBtn.addEventListener('click', () => {
+            const code = productCodeInput.value;
+            const description = productDescriptionInput.value;
+            showSingleError('');
+            if (!code) {
+                showSingleError('Por favor, insira o Código do Produto.');
+                return;
+            }
+            productCodePreview.textContent = code;
+            productDescriptionPreview.textContent = description;
+            JsBarcode("#barcode", code, { format: "CODE128", displayValue: false, margin: 10, height: 50 });
+            previewSection.classList.remove('hidden');
+            infoSection.classList.remove('hidden');
+            scanInfo.textContent = `"${code}"`;
+            printBtn.disabled = false;
+        });
+
+        printBtn.addEventListener('click', () => {
+            const code = productCodeInput.value;
+            const description = productDescriptionInput.value;
+            const quantity = parseInt(labelQuantityInput.value, 10) || 1;
+            const sizeClass = labelSizeSelect.value;
+            if (!code) {
+                showSingleError('Gere uma pré-visualização antes de imprimir.');
+                return;
+            }
+            printArea.innerHTML = ''; 
+            for(let i = 0; i < quantity; i++) {
+                createLabelForPrint(printArea, code, description, sizeClass, `single-${i}`);
+            }
+            if (quantity > 0) {
+                window.print();
+            }
+        });
+        
+        batchFileUpload.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                processBatchFile(e.target.result);
+            };
+            reader.onerror = () => {
+                showBatchError('Não foi possível ler o arquivo.');
+            };
+            reader.readAsText(file);
+            event.target.value = null;
+        });
+
+        function processBatchFile(content) {
+            printArea.innerHTML = '';
+            showBatchError('');
+            const sizeClass = labelSizeSelect.value;
+            const lines = content.split(/\r?\n/);
+            let labelsGenerated = 0;
+            lines.forEach((line, index) => {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) return;
+                const parts = trimmedLine.split(',');
+                if (parts.length < 2) {
+                    console.warn(`Linha ${index + 1} ignorada: formato inválido.`);
+                    return;
+                }
+                const code = parts[0].trim();
+                const description = parts.slice(1).join(',').trim();
+                if (!code) {
+                    console.warn(`Linha ${index + 1} ignorada: código do produto ausente.`);
+                    return;
+                }
+                createLabelForPrint(printArea, code, description, sizeClass, `batch-${index}`);
+                labelsGenerated++;
+            });
+            if (labelsGenerated > 0) {
+                window.print();
+            } else {
+                showBatchError('Nenhuma etiqueta válida foi encontrada no arquivo. Verifique o formato: código,descrição');
+            }
+        }
+
+        function createLabelForPrint(container, code, description, sizeClass, uniqueId) {
+            const labelElement = document.createElement('div');
+            labelElement.className = `label-print ${sizeClass}`;
+            let replications = 1;
+            if (sizeClass === 'size-10x8') { replications = 2; } 
+            else if (sizeClass === 'size-15x10') { replications = 3; }
+            for (let i = 0; i < replications; i++) {
+                const contentContainer = document.createElement('div');
+                contentContainer.className = 'replicated-content';
+                const codeElement = document.createElement('div');
+                codeElement.className = 'product-code';
+                codeElement.textContent = code;
+                const barcodeId = `barcode-print-${uniqueId}-${i}`;
+                const barcodeSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                barcodeSvg.id = barcodeId;
+                barcodeSvg.className = 'barcode-svg-print';
+                const descriptionElement = document.createElement('div');
+                descriptionElement.className = 'product-description';
+                descriptionElement.textContent = description;
+                contentContainer.appendChild(codeElement);
+                contentContainer.appendChild(barcodeSvg);
+                contentContainer.appendChild(descriptionElement);
+                labelElement.appendChild(contentContainer);
+            }
+            container.appendChild(labelElement);
+            for (let i = 0; i < replications; i++) {
+                const barcodeId = `#barcode-print-${uniqueId}-${i}`;
+                try {
+                    JsBarcode(barcodeId, code, { format: "CODE128", displayValue: false, margin: 0 });
+                } catch (e) {
+                    console.error(`Erro ao gerar código de barras para "${code}":`, e);
+                }
+            }
+        }
+
+        function showBatchError(message) {
+            batchError.textContent = message;
+            batchError.classList.toggle('hidden', !message);
+        }
+
+        function showSingleError(message) {
+            singleError.textContent = message;
+            singleError.classList.toggle('hidden', !message);
+        }
 
 
         filterStatus.addEventListener('change', renderRequisitions);
