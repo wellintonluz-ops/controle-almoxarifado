@@ -1588,7 +1588,7 @@
                 const barcodeId = `barcode-print-${uniqueId}-${i}`;
                 const barcodeSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
                 barcodeSvg.id = barcodeId;
-                barcodeSvg.className = 'barcode-svg-print';
+                barcodeSvg.setAttribute('class', 'barcode-svg-print');
                 const descriptionElement = document.createElement('div');
                 descriptionElement.className = 'product-description';
                 descriptionElement.textContent = description;
