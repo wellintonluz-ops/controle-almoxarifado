@@ -856,6 +856,8 @@
             if (submitItemBtn) submitItemBtn.disabled = !isAdminReady;
             if (submitEmployeeBtn) submitEmployeeBtn.disabled = !isAdminReady;
             if (importExcelBtn) importExcelBtn.disabled = !isAdminReady;
+            if (generateBtn) generateBtn.disabled = !isReady;
+            if (printBtn) printBtn.disabled = true; // Always start disabled
 
             renderRequisitions();
             renderItems();
