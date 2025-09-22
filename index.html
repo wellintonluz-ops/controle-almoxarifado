@@ -599,12 +599,12 @@
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, where, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // ************************************************************************************
-        // COLE AQUI AS CONFIGURAÇÕES DO SEU PROJETO FIREBASE
-        // Encontre isso em: Configurações do Projeto > Geral > Seus apps > Configuração do SDK
+        // CONFIGURAÇÃO DO SEU PROJETO FIREBASE
+        // ************************************************************************************
         const firebaseConfig = {
             apiKey: "AIzaSyCGigRYfJJxHXbuGKxOJJuThvpI_toaqtU",
             authDomain: "controle-almoxarifado-f93d1.firebaseapp.com",
@@ -614,7 +614,6 @@
             appId: "1:356583692861:web:661a39926169be489fa854",
             measurementId: "G-ZVN8JKEB6P"
         };
-        // Use um nome único para o seu aplicativo, como o nome do projeto.
         const appId = 'controle-almoxarifado-f93d1';
         // ************************************************************************************
 
