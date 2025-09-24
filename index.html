@@ -206,7 +206,7 @@
                 <button id="tab-dashboard" class="tab hidden">Dashboard</button>
                 <button id="tab-requisitions" class="tab tab-active">Requisições</button>
                 <button id="tab-stock" class="tab hidden">Estoque</button>
-                <button id="tab-kanban" class="tab hidden">Kanban Equipamentos</button>
+                <button id="tab-kanban" class="tab hidden">Controle de Equipamentos</button>
                 <button id="tab-labels" class="tab hidden">Gerar Etiquetas</button>
                 <button id="tab-items" class="tab hidden">Cadastro de Itens</button>
                 <button id="tab-employees" class="tab hidden">Cadastro de Funcionários</button>
@@ -855,9 +855,9 @@
             if (submitItemBtn) submitItemBtn.disabled = !isAdminReady;
             if (submitEmployeeBtn) submitEmployeeBtn.disabled = !isAdminReady;
             if (importExcelBtn) importExcelBtn.disabled = !isAdminReady;
-            if (generateBtn) generateBtn.disabled = !isAdminReady;
+            if (generateBtn) generateBtn.disabled = !isReady; // Corrected this line
             if (printBtn) printBtn.disabled = true; // Always start disabled
-            if (batchFileUpload) batchFileUpload.disabled = !isAdminReady;
+            if (batchFileUpload) batchFileUpload.disabled = !isReady; // Corrected this line
 
 
             renderRequisitions();
