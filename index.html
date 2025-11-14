@@ -70,6 +70,8 @@
         .kanban-card {
             cursor: grab;
             user-select: none;
+            touch-action: none;
+            -webkit-user-drag: element;
         }
         .kanban-card:active {
             cursor: grabbing;
@@ -77,11 +79,13 @@
         .dragging {
             opacity: 0.5;
             transform: rotate(2deg);
+            transition: opacity 0.2s, transform 0.2s;
         }
         .drag-over {
             border-style: dashed;
             border-color: #4f46e5;
             background-color: rgba(79, 70, 229, 0.05);
+            transition: all 0.2s;
         }
         .hidden-from-screen {
             position: absolute;
@@ -1651,24 +1655,21 @@
                 let touchStartY = 0;
                 let touchStartX = 0;
                 let isTouchDragging = false;
+                let clone = null;
                 
                 card.addEventListener('touchstart', (e) => {
+                    // Não iniciar drag se clicou em um botão
+                    if (e.target.closest('button')) return;
+                    
                     const touch = e.touches[0];
                     touchStartX = touch.clientX;
                     touchStartY = touch.clientY;
                     draggedCardId = card.dataset.id;
-                    isTouchDragging = true;
-                    
-                    setTimeout(() => {
-                        if (isTouchDragging) {
-                            card.classList.add('dragging');
-                            card.style.opacity = '0.5';
-                        }
-                    }, 100);
+                    isTouchDragging = false; // Só ativa após movimento
                 }, { passive: true });
                 
                 card.addEventListener('touchmove', (e) => {
-                    if (!isTouchDragging) return;
+                    if (!draggedCardId) return;
                     
                     const touch = e.touches[0];
                     const deltaX = Math.abs(touch.clientX - touchStartX);
@@ -1676,14 +1677,25 @@
                     
                     // Se moveu mais de 10px, considera como drag
                     if (deltaX > 10 || deltaY > 10) {
+                        if (!isTouchDragging) {
+                            isTouchDragging = true;
+                            card.classList.add('dragging');
+                            card.style.opacity = '0.5';
+                        }
+                        
                         e.preventDefault();
                         
-                        // Destacar coluna onde está o toque
+                        // Ocultar temporariamente o card para elementFromPoint funcionar
+                        card.style.visibility = 'hidden';
                         const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+                        card.style.visibility = 'visible';
+                        
+                        // Remover destaque de todas as colunas
                         document.querySelectorAll('.kanban-column .kanban-cards').forEach(col => {
                             col.classList.remove('drag-over');
                         });
                         
+                        // Adicionar destaque na coluna alvo
                         const column = elementBelow?.closest('.kanban-cards');
                         if (column) {
                             column.classList.add('drag-over');
@@ -1692,45 +1704,52 @@
                 }, { passive: false });
                 
                 card.addEventListener('touchend', async (e) => {
-                    if (!isTouchDragging) return;
+                    if (!draggedCardId) return;
                     
-                    isTouchDragging = false;
                     card.classList.remove('dragging');
                     card.style.opacity = '1';
                     
-                    const touch = e.changedTouches[0];
-                    const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
-                    const targetColumn = elementBelow?.closest('.kanban-cards');
-                    
-                    document.querySelectorAll('.kanban-column .kanban-cards').forEach(col => {
-                        col.classList.remove('drag-over');
-                    });
-                    
-                    if (targetColumn) {
-                        const newStatus = targetColumn.parentElement.id;
-                        const equipDoc = allKanbanEquipmentsDocs.find(d => d.id === draggedCardId);
+                    if (isTouchDragging) {
+                        const touch = e.changedTouches[0];
                         
-                        if (equipDoc && equipDoc.data().status !== newStatus) {
-                            if (newStatus === 'em-uso') {
-                                document.getElementById('checkout-equipment-id').value = draggedCardId;
-                                populateSelects();
-                                equipmentModal.classList.add('hidden');
-                                checkoutModal.classList.remove('hidden');
-                            } else {
-                                const updateData = {
-                                    status: newStatus,
-                                    user: null,
-                                    department: null,
-                                    checkoutDate: null,
-                                    maintenanceDate: newStatus === 'em-manutencao' ? serverTimestamp() : null
-                                };
-                                await updateDoc(doc(kanbanEquipmentsCollection, draggedCardId), updateData);
+                        // Ocultar temporariamente o card para elementFromPoint funcionar
+                        card.style.visibility = 'hidden';
+                        const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+                        card.style.visibility = 'visible';
+                        
+                        const targetColumn = elementBelow?.closest('.kanban-cards');
+                        
+                        document.querySelectorAll('.kanban-column .kanban-cards').forEach(col => {
+                            col.classList.remove('drag-over');
+                        });
+                        
+                        if (targetColumn) {
+                            const newStatus = targetColumn.parentElement.id;
+                            const equipDoc = allKanbanEquipmentsDocs.find(d => d.id === draggedCardId);
+                            
+                            if (equipDoc && equipDoc.data().status !== newStatus) {
+                                if (newStatus === 'em-uso') {
+                                    document.getElementById('checkout-equipment-id').value = draggedCardId;
+                                    populateSelects();
+                                    equipmentModal.classList.add('hidden');
+                                    checkoutModal.classList.remove('hidden');
+                                } else {
+                                    const updateData = {
+                                        status: newStatus,
+                                        user: null,
+                                        department: null,
+                                        checkoutDate: null,
+                                        maintenanceDate: newStatus === 'em-manutencao' ? serverTimestamp() : null
+                                    };
+                                    await updateDoc(doc(kanbanEquipmentsCollection, draggedCardId), updateData);
+                                }
                             }
                         }
                     }
                     
+                    isTouchDragging = false;
                     draggedCardId = null;
-                }, { passive: true });
+                });
                 
                 card.addEventListener('touchcancel', () => {
                     isTouchDragging = false;
