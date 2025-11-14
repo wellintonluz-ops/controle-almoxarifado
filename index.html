@@ -91,6 +91,58 @@
             height: 1px;
             overflow: hidden;
         }
+        .item-search-container {
+            position: relative;
+        }
+        .item-search-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 200px;
+            overflow-y: auto;
+            background: white;
+            border: 1px solid #d1d5db;
+            border-top: none;
+            border-radius: 0 0 0.375rem 0.375rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            z-index: 10;
+            display: none;
+        }
+        .item-search-dropdown.active {
+            display: block;
+        }
+        .item-search-option {
+            padding: 0.5rem 0.75rem;
+            cursor: pointer;
+            transition: background-color 0.15s;
+        }
+        .item-search-option:hover {
+            background-color: #f3f4f6;
+        }
+        .item-search-option.selected {
+            background-color: #dbeafe;
+        }
+        .item-search-option-code {
+            font-weight: 600;
+            color: #1f2937;
+        }
+        .item-search-option-desc {
+            font-size: 0.875rem;
+            color: #6b7280;
+        }
+        .item-inactive {
+            background-color: #f3f4f6;
+            opacity: 0.6;
+        }
+        .status-ativo { 
+            background-color: #d1fae5; 
+            color: #065f46; 
+        }
+        .status-inativo { 
+            background-color: #f3f4f6; 
+            color: #6b7280; 
+        }
         .label-preview-container {
             width: 500px;
             height: 150px;
@@ -217,15 +269,22 @@
         <div id="view-dashboard" class="hidden">
             <div class="bg-white p-6 rounded-lg shadow-md">
                 <h2 class="text-xl font-semibold mb-4">Dashboard de Consumo</h2>
-                <div class="flex flex-col md:flex-row md:space-x-4 mb-6">
-                    <div class="flex-1 mb-4 md:mb-0">
-                        <label for="dashboard-period" class="block text-sm font-medium text-gray-700">Período</label>
-                        <select id="dashboard-period" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
-                            <option value="monthly">Este Mês</option>
-                            <option value="weekly">Últimos 7 dias</option>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    <div>
+                        <label for="dashboard-start-date" class="block text-sm font-medium text-gray-700">Data Início</label>
+                        <input type="date" id="dashboard-start-date" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    </div>
+                    <div>
+                        <label for="dashboard-end-date" class="block text-sm font-medium text-gray-700">Data Fim</label>
+                        <input type="date" id="dashboard-end-date" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    </div>
+                    <div>
+                        <label for="dashboard-product" class="block text-sm font-medium text-gray-700">Produto</label>
+                        <select id="dashboard-product" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
+                            <option value="all">Todos</option>
                         </select>
                     </div>
-                    <div class="flex-1">
+                    <div>
                         <label for="dashboard-requester" class="block text-sm font-medium text-gray-700">Solicitante</label>
                         <select id="dashboard-requester" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
                             <option value="all">Todos</option>
@@ -246,7 +305,7 @@
                 <form id="requisition-form" class="grid grid-cols-1 md:grid-cols-6 gap-6">
                     <div class="md:col-span-3"><label for="requester-select" class="block text-sm font-medium text-gray-700">Solicitante</label><select id="requester-select" name="requester" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"><option value="">Selecione um funcionário...</option></select></div>
                     <div class="md:col-span-3"><label for="department" class="block text-sm font-medium text-gray-700">Departamento</label><input type="text" id="department" name="department" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 focus:outline-none sm:text-sm"></div>
-                    <div class="md:col-span-3"><label for="item-select" class="block text-sm font-medium text-gray-700">Item Solicitado</label><select id="item-select" name="item-select" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"><option value="">Selecione um item...</option></select></div>
+                    <div class="md:col-span-3 item-search-container"><label for="item-search-input" class="block text-sm font-medium text-gray-700">Item Solicitado</label><input type="text" id="item-search-input" placeholder="Digite para pesquisar..." autocomplete="off" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"><div id="item-search-dropdown" class="item-search-dropdown"></div><input type="hidden" id="item-select" name="item-select" required></div>
                     <div class="md:col-span-2"><label for="selected-item-code" class="block text-sm font-medium text-gray-700">Código do Item</label><input type="text" id="selected-item-code" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 focus:outline-none sm:text-sm"></div>
                     <div class="md:col-span-1"><label for="quantity" class="block text-sm font-medium text-gray-700">Quantidade</label><input type="number" id="quantity" name="quantity" min="1" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
                     <div class="md:col-span-6"><label for="justification" class="block text-sm font-medium text-gray-700">Justificativa</label><textarea id="justification" name="justification" rows="3" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></textarea></div>
@@ -314,6 +373,39 @@
                             <div class="text-right">
                                 <button type="submit" id="submit-stock-entry-btn" class="w-full btn-primary font-semibold py-2 px-6 rounded-md shadow-sm" disabled>
                                     Registrar Entrada
+                                </button>
+                            </div>
+                        </form>
+                     </div>
+                     
+                     <!-- Transferência de Estoque -->
+                     <div class="bg-white p-6 rounded-lg shadow-md mt-8">
+                        <h2 class="text-xl font-semibold mb-4">Transferência de Estoque</h2>
+                        <form id="stock-transfer-form">
+                            <div class="mb-4">
+                                <label for="transfer-item-select" class="block text-sm font-medium text-gray-700">Item</label>
+                                <select id="transfer-item-select" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                                    <option value="">Selecione um item...</option>
+                                </select>
+                            </div>
+                            <div class="mb-4">
+                                <label for="transfer-from-address" class="block text-sm font-medium text-gray-700">Endereço de Origem</label>
+                                <select id="transfer-from-address" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                                    <option value="">Selecione a origem...</option>
+                                </select>
+                                <p id="origin-quantity" class="text-xs text-gray-500 mt-1"></p>
+                            </div>
+                            <div class="mb-4">
+                                <label for="transfer-to-address" class="block text-sm font-medium text-gray-700">Endereço de Destino</label>
+                                <input type="text" id="transfer-to-address" required placeholder="Ex: Corredor B, Prat. 3" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                            </div>
+                            <div class="mb-4">
+                                <label for="transfer-quantity" class="block text-sm font-medium text-gray-700">Quantidade a Transferir</label>
+                                <input type="number" id="transfer-quantity" min="1" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                            </div>
+                            <div class="text-right">
+                                <button type="submit" id="submit-transfer-btn" class="w-full btn-primary font-semibold py-2 px-6 rounded-md shadow-sm" disabled>
+                                    Transferir Estoque
                                 </button>
                             </div>
                         </form>
@@ -471,7 +563,13 @@
                 </form>
             </div>
             <div class="bg-white p-6 rounded-lg shadow-md">
-                <div class="flex justify-between items-center mb-4"><h2 class="text-xl font-semibold">Itens Cadastrados (Visão Geral)</h2><div id="loading-items" class="loader hidden"></div></div>
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold">Itens Cadastrados (Visão Geral)</h2>
+                    <div class="flex items-center gap-4">
+                        <button id="clean-duplicates-btn" class="btn-danger font-semibold py-2 px-4 rounded-md shadow-sm text-sm hidden">Limpar Duplicados</button>
+                        <div id="loading-items" class="loader hidden"></div>
+                    </div>
+                </div>
                  <div class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-gray-50">
@@ -480,6 +578,7 @@
                                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
                                 <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Estoque Seg.</th>
                                 <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Estoque Total</th>
+                                <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                 <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
                             </tr>
                         </thead>
@@ -631,16 +730,21 @@
         const viewLabels = document.getElementById('view-labels');
         const viewRequisitions = document.getElementById('view-requisitions'), viewStock = document.getElementById('view-stock'), viewItems = document.getElementById('view-items'), viewEmployees = document.getElementById('view-employees');
         const requisitionForm = document.getElementById('requisition-form'), requisitionsListBody = document.getElementById('requisitions-list'), loadingRequisitions = document.getElementById('loading-requisitions'), noRequisitionsMessage = document.getElementById('no-requisitions'), filterStatus = document.getElementById('filter-status'), filterRequester = document.getElementById('filter-requester'), requesterSelect = document.getElementById('requester-select'), departmentInput = document.getElementById('department'), itemSelect = document.getElementById('item-select'), selectedItemCodeInput = document.getElementById('selected-item-code');
-        const itemForm = document.getElementById('item-form'), itemsListBody = document.getElementById('items-list'), loadingItems = document.getElementById('loading-items'), noItemsMessage = document.getElementById('no-items'), submitItemBtn = document.getElementById('submit-item-btn'), excelFileInput = document.getElementById('excel-file-input'), importExcelBtn = document.getElementById('import-excel-btn'), importFeedback = document.getElementById('import-feedback');
+        const itemForm = document.getElementById('item-form'), itemsListBody = document.getElementById('items-list'), loadingItems = document.getElementById('loading-items'), noItemsMessage = document.getElementById('no-items'), submitItemBtn = document.getElementById('submit-item-btn'), excelFileInput = document.getElementById('excel-file-input'), importExcelBtn = document.getElementById('import-excel-btn'), importFeedback = document.getElementById('import-feedback'), cleanDuplicatesBtn = document.getElementById('clean-duplicates-btn');
         const employeeForm = document.getElementById('employee-form'), employeesListBody = document.getElementById('employees-list'), loadingEmployees = document.getElementById('loading-employees'), noEmployeesMessage = document.getElementById('no-employees'), submitEmployeeBtn = document.getElementById('submit-employee-btn');
         const statusModal = document.getElementById('status-modal'), statusSelect = document.getElementById('status-select'), modalRequisitionId = document.getElementById('modal-requisition-id'), modalOriginalStatus = document.getElementById('modal-original-status'), cancelUpdateBtn = document.getElementById('cancel-update'), confirmUpdateBtn = document.getElementById('confirm-update');
         const loginModal = document.getElementById('login-modal'), loginForm = document.getElementById('login-form'), cancelLoginBtn = document.getElementById('cancel-login'), loginError = document.getElementById('login-error');
         const loadingStock = document.getElementById('loading-stock'), stockListBody = document.getElementById('stock-list'), noStockItems = document.getElementById('no-stock-items'), stockEntryForm = document.getElementById('stock-entry-form'), stockItemSelect = document.getElementById('stock-item-select'), submitStockEntryBtn = document.getElementById('submit-stock-entry-btn'), stockItemSearchInput = document.getElementById('stock-item-search');
+        const stockTransferForm = document.getElementById('stock-transfer-form'), transferItemSelect = document.getElementById('transfer-item-select'), transferFromAddress = document.getElementById('transfer-from-address'), transferToAddress = document.getElementById('transfer-to-address'), transferQuantity = document.getElementById('transfer-quantity'), submitTransferBtn = document.getElementById('submit-transfer-btn'), originQuantity = document.getElementById('origin-quantity');
         const locationSelectModal = document.getElementById('location-select-modal'), locationsList = document.getElementById('locations-list'), locationSelectError = document.getElementById('location-select-error'), confirmLocationSelectionBtn = document.getElementById('confirm-location-selection'), cancelLocationSelectionBtn = document.getElementById('cancel-location-selection'), modalLocationReqId = document.getElementById('modal-location-req-id');
         const editItemModal = document.getElementById('edit-item-modal'), editItemForm = document.getElementById('edit-item-form'), cancelEditItemBtn = document.getElementById('cancel-edit-item');
-        const dashboardPeriodSelect = document.getElementById('dashboard-period');
+        const dashboardStartDate = document.getElementById('dashboard-start-date');
+        const dashboardEndDate = document.getElementById('dashboard-end-date');
+        const dashboardProductSelect = document.getElementById('dashboard-product');
         const dashboardRequesterSelect = document.getElementById('dashboard-requester');
         const consumptionChartCanvas = document.getElementById('consumption-chart');
+        const itemSearchInput = document.getElementById('item-search-input');
+        const itemSearchDropdown = document.getElementById('item-search-dropdown');
 
         // Kanban Elements
         const kanbanBoard = document.getElementById('kanban-board');
@@ -675,12 +779,25 @@
         let isFirestoreReady = false;
         let allRequisitionsDocs = [], allItemsDocs = [], allEmployeesDocs = [], allStockLocationsDocs = [], allKanbanEquipmentsDocs = [];
         let consumptionChart = null;
+        let formListenersAttached = false; // Flag para evitar duplicação de listeners
 
 
         // Verifica se o usuário já estava logado na sessão
         if (sessionStorage.getItem('isUserLoggedIn') === 'true') {
             isLoggedIn = true;
         }
+        
+        // Inicializar datas padrão do dashboard (últimos 30 dias)
+        function initializeDashboardDates() {
+            const today = new Date();
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(today.getDate() - 30);
+            
+            dashboardEndDate.value = today.toISOString().split('T')[0];
+            dashboardStartDate.value = thirtyDaysAgo.toISOString().split('T')[0];
+        }
+        
+        initializeDashboardDates();
 
         async function setupAuthAndFirestore() {
             try {
@@ -738,32 +855,83 @@
         const renderItems = () => {
             itemsListBody.innerHTML = '';
             noItemsMessage.classList.toggle('hidden', allItemsDocs.length > 0);
+            
+            // Detectar duplicados
+            const codeCount = {};
             allItemsDocs.forEach(doc => {
+                const code = doc.data().code?.toUpperCase() || '';
+                codeCount[code] = (codeCount[code] || 0) + 1;
+            });
+            const hasDuplicates = Object.values(codeCount).some(count => count > 1);
+            
+            // Mostrar/ocultar botão de limpar duplicados
+            if (isLoggedIn && hasDuplicates) {
+                cleanDuplicatesBtn.classList.remove('hidden');
+            } else {
+                cleanDuplicatesBtn.classList.add('hidden');
+            }
+            
+            // Ordenar itens por código (A-Z)
+            const sortedItems = [...allItemsDocs].sort((a, b) => {
+                const codeA = a.data().code?.toUpperCase() || '';
+                const codeB = b.data().code?.toUpperCase() || '';
+                return codeA.localeCompare(codeB);
+            });
+            
+            sortedItems.forEach(doc => {
                 const itemData = doc.data();
+                const isActive = itemData.active !== false; // Por padrão é ativo se não definido
                 const totalStock = allStockLocationsDocs
                     .filter(loc => loc.data().itemCode === itemData.code)
                     .reduce((sum, loc) => sum + loc.data().quantity, 0);
                 
                 const safetyStock = itemData.safetyStock || 0;
                 let stockClass = '';
-                if (totalStock <= safetyStock) {
+                if (!isActive) {
+                    stockClass = 'item-inactive';
+                } else if (totalStock <= safetyStock) {
                     stockClass = 'bg-red-100 hover:bg-red-200';
                 } else if (totalStock <= safetyStock * 1.25) {
                     stockClass = 'bg-yellow-100 hover:bg-yellow-200';
                 }
+                
+                const statusText = isActive ? 'Ativo' : 'Inativo';
+                const statusClass = isActive ? 'status-ativo' : 'status-inativo';
+                const toggleText = isActive ? 'Inativar' : 'Ativar';
+                const toggleClass = isActive ? 'text-orange-600 hover:text-orange-900' : 'text-green-600 hover:text-green-900';
 
-                itemsListBody.innerHTML += `<tr class="${stockClass}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${itemData.code}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemData.description}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">${safetyStock}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm font-semibold">${totalStock}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${isLoggedIn ? `<button data-id="${doc.id}" class="edit-item-btn text-blue-600 hover:text-blue-900 mr-4">Editar</button><button data-id="${doc.id}" class="delete-item-btn text-red-600 hover:text-red-900">Excluir</button>`: ''}</td></tr>`;
+                itemsListBody.innerHTML += `<tr class="${stockClass}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${itemData.code}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemData.description}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">${safetyStock}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm font-semibold">${totalStock}</td><td class="px-6 py-4 whitespace-nowrap text-center"><span class="status-badge ${statusClass}">${statusText}</span></td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${isLoggedIn ? `<button data-id="${doc.id}" class="edit-item-btn text-blue-600 hover:text-blue-900 mr-4">Editar</button><button data-id="${doc.id}" data-active="${isActive}" class="toggle-item-btn ${toggleClass} mr-4">${toggleText}</button><button data-id="${doc.id}" class="delete-item-btn text-red-600 hover:text-red-900">Excluir</button>`: ''}</td></tr>`;
             });
             document.querySelectorAll('.edit-item-btn').forEach(b => b.addEventListener('click', (e) => openEditItemModal(e.target)));
+            document.querySelectorAll('.toggle-item-btn').forEach(b => b.addEventListener('click', async (e) => toggleItemActive(e.target)));
             document.querySelectorAll('.delete-item-btn').forEach(b => b.addEventListener('click', async (e) => { if (confirm('Excluir este item e todos os seus registros de estoque?')) await deleteDoc(doc(itemsCollection, e.target.dataset.id)); }));
         };
 
         const renderStock = () => {
             stockListBody.innerHTML = '';
             noStockItems.classList.toggle('hidden', allStockLocationsDocs.length > 0);
-            allStockLocationsDocs.forEach(locDoc => {
+            
+            // Ordenar estoque por código do item (A-Z)
+            const sortedStock = [...allStockLocationsDocs].sort((a, b) => {
+                const codeA = a.data().itemCode?.toUpperCase() || '';
+                const codeB = b.data().itemCode?.toUpperCase() || '';
+                return codeA.localeCompare(codeB);
+            });
+            
+            sortedStock.forEach(locDoc => {
                 const locData = locDoc.data();
                 const item = allItemsDocs.find(itemDoc => itemDoc.data().code === locData.itemCode);
+                
+                // Não mostrar itens inativos no estoque
+                if (item && item.data().active === false) {
+                    return;
+                }
+                
+                // Não mostrar itens com quantidade zero
+                if (locData.quantity === 0 || !locData.quantity) {
+                    return;
+                }
+                
                 const description = item ? item.data().description : "Item não encontrado";
                 const safetyStock = item ? (item.data().safetyStock || 0) : 0;
 
@@ -798,23 +966,32 @@
         };
         
         const populateSelects = () => {
-            [itemSelect, stockItemSelect].forEach(select => {
-                const currentVal = select.value;
-                select.innerHTML = `<option value="">Selecione um item...</option>`;
-                allItemsDocs.forEach(doc => {
-                    const data = doc.data();
-                    const optionValue = JSON.stringify({ id: doc.id, code: data.code, description: data.description });
-                    select.innerHTML += `<option value='${optionValue}'>${data.description}</option>`;
-                });
-                select.value = currentVal;
+            // Popular apenas o select de estoque (o item-select agora é hidden e usa pesquisa)
+            const currentStockVal = stockItemSelect.value;
+            const currentTransferVal = transferItemSelect.value;
+            
+            stockItemSelect.innerHTML = `<option value="">Selecione um item...</option>`;
+            transferItemSelect.innerHTML = `<option value="">Selecione um item...</option>`;
+            
+            allItemsDocs.forEach(doc => {
+                const data = doc.data();
+                // Não adicionar itens inativos ao select
+                if (data.active === false) return;
+                const optionValue = JSON.stringify({ id: doc.id, code: data.code, description: data.description });
+                stockItemSelect.innerHTML += `<option value='${optionValue}'>${data.description}</option>`;
+                transferItemSelect.innerHTML += `<option value='${optionValue}'>${data.description}</option>`;
             });
+            stockItemSelect.value = currentStockVal;
+            transferItemSelect.value = currentTransferVal;
 
             const currentReq = requesterSelect.value;
             const currentDashReq = dashboardRequesterSelect.value;
+            const currentDashProduct = dashboardProductSelect.value;
             const currentUserSelect = userSelect.value;
             
             requesterSelect.innerHTML = '<option value="">Selecione um funcionário...</option>';
             dashboardRequesterSelect.innerHTML = '<option value="all">Todos</option>';
+            dashboardProductSelect.innerHTML = '<option value="all">Todos</option>';
             userSelect.innerHTML = '<option value="" disabled selected>Selecione um funcionário...</option>';
             
             allEmployeesDocs.forEach(doc => {
@@ -823,8 +1000,17 @@
                 dashboardRequesterSelect.innerHTML += `<option value="${data.name}">${data.name}</option>`;
                 userSelect.innerHTML += `<option value="${doc.id}">${data.name} (${data.department})</option>`;
             });
+            
+            // Popular produtos no dashboard
+            allItemsDocs.forEach(doc => {
+                const data = doc.data();
+                if (data.active === false) return;
+                dashboardProductSelect.innerHTML += `<option value="${data.code}">[${data.code}] ${data.description}</option>`;
+            });
+            
             requesterSelect.value = currentReq;
             dashboardRequesterSelect.value = currentDashReq;
+            dashboardProductSelect.value = currentDashProduct;
             userSelect.value = currentUserSelect;
         };
         
@@ -852,6 +1038,7 @@
             if (requisitionSubmitBtn) requisitionSubmitBtn.disabled = !isReady;
             
             if (submitStockEntryBtn) submitStockEntryBtn.disabled = !isAdminReady;
+            if (submitTransferBtn) submitTransferBtn.disabled = !isAdminReady;
             if (submitItemBtn) submitItemBtn.disabled = !isAdminReady;
             if (submitEmployeeBtn) submitEmployeeBtn.disabled = !isAdminReady;
             if (importExcelBtn) importExcelBtn.disabled = !isAdminReady;
@@ -868,71 +1055,148 @@
             renderKanbanBoard();
         }
 
-        requisitionForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const item = JSON.parse(itemSelect.value);
-            await addDoc(requisitionsCollection, {
-                requester: requesterSelect.value,
-                department: departmentInput.value,
-                itemCode: item.code,
-                itemDescription: item.description,
-                quantity: Number(requisitionForm.quantity.value),
-                justification: requisitionForm.justification.value,
-                status: 'Pendente',
-                createdAt: serverTimestamp()
-            });
-            requisitionForm.reset();
-            selectedItemCodeInput.value = '';
-            departmentInput.value = '';
-        });
-        
-        itemForm.addEventListener('submit', async (e) => { 
-            e.preventDefault(); 
-            if (!isLoggedIn) return; 
-            await addDoc(itemsCollection, { 
-                code: document.getElementById('item-code').value, 
-                description: document.getElementById('item-description').value,
-                safetyStock: Number(document.getElementById('item-safety-stock').value) || 0
-            }); 
-            itemForm.reset(); 
-        });
-
-        employeeForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            if(!isLoggedIn) return;
-            await addDoc(employeesCollection, {
-                name: employeeForm['employee-name'].value,
-                department: employeeForm['employee-department'].value
-            });
-            employeeForm.reset();
-        });
-        
-        stockEntryForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            if (!isLoggedIn) return;
-            const itemData = JSON.parse(stockItemSelect.value);
-            const address = document.getElementById('stock-entry-address').value.trim();
-            const quantityToAdd = Number(document.getElementById('stock-entry-quantity').value);
-
-            const existingLocation = allStockLocationsDocs.find(doc => doc.data().itemCode === itemData.code && doc.data().address === address);
+        // Adicionar event listeners apenas uma vez
+        if (!formListenersAttached) {
+            formListenersAttached = true;
             
-            try {
-                if (existingLocation) {
-                    const newQuantity = (existingLocation.data().quantity || 0) + quantityToAdd;
-                    await updateDoc(doc(stockLocationsCollection, existingLocation.id), { quantity: newQuantity });
-                } else {
-                    await addDoc(stockLocationsCollection, {
-                        itemCode: itemData.code,
-                        address: address,
-                        quantity: quantityToAdd
-                    });
+            requisitionForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const item = JSON.parse(itemSelect.value);
+                await addDoc(requisitionsCollection, {
+                    requester: requesterSelect.value,
+                    department: departmentInput.value,
+                    itemCode: item.code,
+                    itemDescription: item.description,
+                    quantity: Number(requisitionForm.quantity.value),
+                    justification: requisitionForm.justification.value,
+                    status: 'Pendente',
+                    createdAt: serverTimestamp()
+                });
+                requisitionForm.reset();
+                selectedItemCodeInput.value = '';
+                departmentInput.value = '';
+                itemSearchInput.value = '';
+                itemSearchDropdown.classList.remove('active');
+            });
+            
+            itemForm.addEventListener('submit', async (e) => { 
+                e.preventDefault(); 
+                if (!isLoggedIn) return;
+                
+                const codeInput = document.getElementById('item-code');
+                const code = codeInput.value.trim().toUpperCase();
+                
+                // Verificar se o código já existe
+                const duplicateItem = allItemsDocs.find(doc => doc.data().code.toUpperCase() === code);
+                if (duplicateItem) {
+                    alert(`O código "${code}" já está cadastrado! Por favor, use um código diferente.`);
+                    codeInput.focus();
+                    codeInput.select();
+                    return;
                 }
-                stockEntryForm.reset();
-            } catch (error) {
-                console.error("Erro ao registrar entrada no estoque: ", error);
-                alert("Falha ao registrar entrada.");
-            }
-        });
+                
+                await addDoc(itemsCollection, { 
+                    code: codeInput.value.trim(), 
+                    description: document.getElementById('item-description').value.trim(),
+                    safetyStock: Number(document.getElementById('item-safety-stock').value) || 0,
+                    active: true
+                }); 
+                itemForm.reset(); 
+            });
+
+            employeeForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                if(!isLoggedIn) return;
+                await addDoc(employeesCollection, {
+                    name: employeeForm['employee-name'].value,
+                    department: employeeForm['employee-department'].value
+                });
+                employeeForm.reset();
+            });
+            
+            stockEntryForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                if (!isLoggedIn) return;
+                const itemData = JSON.parse(stockItemSelect.value);
+                const address = document.getElementById('stock-entry-address').value.trim();
+                const quantityToAdd = Number(document.getElementById('stock-entry-quantity').value);
+
+                const existingLocation = allStockLocationsDocs.find(doc => doc.data().itemCode === itemData.code && doc.data().address === address);
+                
+                try {
+                    if (existingLocation) {
+                        const newQuantity = (existingLocation.data().quantity || 0) + quantityToAdd;
+                        await updateDoc(doc(stockLocationsCollection, existingLocation.id), { quantity: newQuantity });
+                    } else {
+                        await addDoc(stockLocationsCollection, {
+                            itemCode: itemData.code,
+                            address: address,
+                            quantity: quantityToAdd
+                        });
+                    }
+                    stockEntryForm.reset();
+                } catch (error) {
+                    console.error("Erro ao registrar entrada no estoque: ", error);
+                    alert("Falha ao registrar entrada.");
+                }
+            });
+            
+            stockTransferForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                if (!isLoggedIn) return;
+                
+                const itemData = JSON.parse(transferItemSelect.value);
+                const fromLocationId = transferFromAddress.value;
+                const toAddress = transferToAddress.value.trim();
+                const quantityToTransfer = Number(transferQuantity.value);
+                
+                const fromLocation = allStockLocationsDocs.find(doc => doc.id === fromLocationId);
+                
+                if (!fromLocation) {
+                    alert("Localização de origem não encontrada.");
+                    return;
+                }
+                
+                const fromLocationData = fromLocation.data();
+                const currentQuantity = fromLocationData.quantity || 0;
+                
+                if (quantityToTransfer > currentQuantity) {
+                    alert(`Quantidade insuficiente no endereço de origem. Disponível: ${currentQuantity}`);
+                    return;
+                }
+                
+                try {
+                    // Reduzir quantidade na origem
+                    const newFromQuantity = currentQuantity - quantityToTransfer;
+                    await updateDoc(doc(stockLocationsCollection, fromLocationId), { quantity: newFromQuantity });
+                    
+                    // Adicionar ou aumentar quantidade no destino
+                    const existingToLocation = allStockLocationsDocs.find(doc => 
+                        doc.data().itemCode === itemData.code && 
+                        doc.data().address === toAddress
+                    );
+                    
+                    if (existingToLocation) {
+                        const newToQuantity = (existingToLocation.data().quantity || 0) + quantityToTransfer;
+                        await updateDoc(doc(stockLocationsCollection, existingToLocation.id), { quantity: newToQuantity });
+                    } else {
+                        await addDoc(stockLocationsCollection, {
+                            itemCode: itemData.code,
+                            address: toAddress,
+                            quantity: quantityToTransfer
+                        });
+                    }
+                    
+                    alert(`Transferência realizada com sucesso! ${quantityToTransfer} unidade(s) transferida(s).`);
+                    stockTransferForm.reset();
+                    transferFromAddress.innerHTML = '<option value="">Selecione a origem...</option>';
+                    originQuantity.textContent = '';
+                } catch (error) {
+                    console.error("Erro ao transferir estoque: ", error);
+                    alert("Falha ao transferir estoque: " + error.message);
+                }
+            });
+        }
 
         async function handleExcelImport() {
             if (!isFirestoreReady) {
@@ -960,7 +1224,8 @@
                     
                     const batch = writeBatch(db);
                     const newCodesInBatch = new Set();
-                    const existingCodes = new Set(allItemsDocs.map(doc => doc.data().code));
+                    const existingCodes = new Set(allItemsDocs.map(doc => doc.data().code.toUpperCase()));
+                    let skippedDuplicates = 0;
 
                     for (const row of json) {
                         const codeKey = Object.keys(row).find(k => k.toLowerCase() === 'código' || k.toLowerCase() === 'codigo');
@@ -976,15 +1241,18 @@
                         const qtyKey = Object.keys(row).find(k => k.toLowerCase() === 'quantidade');
 
                         const code = String(row[codeKey]).trim();
+                        const codeUpper = code.toUpperCase();
                         const description = String(row[descKey]).trim();
                         const safetyStock = row[safetyStockKey] ? Number(row[safetyStockKey]) : 0;
                         const address = row[addressKey] ? String(row[addressKey]).trim() : null;
                         const quantity = row[qtyKey] ? Number(row[qtyKey]) : null;
 
-                        if (!existingCodes.has(code) && !newCodesInBatch.has(code)) {
+                        if (!existingCodes.has(codeUpper) && !newCodesInBatch.has(codeUpper)) {
                             const newItemRef = doc(itemsCollection);
-                            batch.set(newItemRef, { code, description, safetyStock });
-                            newCodesInBatch.add(code);
+                            batch.set(newItemRef, { code, description, safetyStock, active: true });
+                            newCodesInBatch.add(codeUpper);
+                        } else {
+                            skippedDuplicates++;
                         }
 
                         if (address && quantity > 0) {
@@ -994,7 +1262,9 @@
                     }
                     
                     await batch.commit();
-                    importFeedback.textContent = `${json.length} linhas processadas com sucesso!`;
+                    const successMsg = `${json.length} linhas processadas com sucesso!`;
+                    const duplicatesMsg = skippedDuplicates > 0 ? ` (${skippedDuplicates} códigos duplicados foram ignorados)` : '';
+                    importFeedback.textContent = successMsg + duplicatesMsg;
                     importFeedback.className = 'text-sm mt-2 text-green-600';
                     excelFileInput.value = '';
                 } catch (error) {
@@ -1059,6 +1329,26 @@
                 alert("Falha ao atualizar o item.");
             }
         });
+
+        async function toggleItemActive(button) {
+            const itemId = button.dataset.id;
+            const isCurrentlyActive = button.dataset.active === 'true';
+            const newActiveState = !isCurrentlyActive;
+            
+            const confirmMessage = newActiveState 
+                ? 'Tem certeza que deseja ativar este item? Ele voltará a aparecer no estoque e nas requisições.' 
+                : 'Tem certeza que deseja inativar este item? Ele não aparecerá mais no estoque e não poderá ser requisitado.';
+            
+            if (!confirm(confirmMessage)) return;
+            
+            try {
+                const itemRef = doc(itemsCollection, itemId);
+                await updateDoc(itemRef, { active: newActiveState });
+            } catch (error) {
+                console.error("Erro ao alterar status do item: ", error);
+                alert("Falha ao alterar o status do item.");
+            }
+        }
 
         async function handleStatusUpdate() {
             const reqId = modalRequisitionId.value;
@@ -1180,26 +1470,31 @@
         function renderDashboard() {
             if (!isFirestoreReady) return;
 
-            const period = dashboardPeriodSelect.value;
+            const startDateValue = dashboardStartDate.value;
+            const endDateValue = dashboardEndDate.value;
+            const product = dashboardProductSelect.value;
             const requester = dashboardRequesterSelect.value;
 
-            const now = new Date();
-            let startDate;
+            if (!startDateValue || !endDateValue) return;
 
-            if (period === 'weekly') {
-                startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
-            } else { // monthly
-                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-            }
+            const startDate = new Date(startDateValue);
+            startDate.setHours(0, 0, 0, 0);
+            
+            const endDate = new Date(endDateValue);
+            endDate.setHours(23, 59, 59, 999);
 
             let filteredReqs = allRequisitionsDocs.filter(doc => {
                 const data = doc.data();
                 const reqDate = data.statusUpdatedAt?.toDate();
-                return data.status === 'Entregue' && reqDate && reqDate >= startDate;
+                return data.status === 'Entregue' && reqDate && reqDate >= startDate && reqDate <= endDate;
             });
 
             if (requester !== 'all') {
                 filteredReqs = filteredReqs.filter(doc => doc.data().requester === requester);
+            }
+            
+            if (product !== 'all') {
+                filteredReqs = filteredReqs.filter(doc => doc.data().itemCode === product);
             }
 
             const consumptionData = filteredReqs.reduce((acc, doc) => {
@@ -1342,6 +1637,7 @@
 
         function addDragDropListeners() {
             document.querySelectorAll('.kanban-card').forEach(card => {
+                // Desktop drag events
                 card.addEventListener('dragstart', () => {
                     draggedCardId = card.dataset.id;
                     setTimeout(() => card.classList.add('dragging'), 0);
@@ -1349,6 +1645,101 @@
                 card.addEventListener('dragend', () => {
                     draggedCardId = null;
                     card.classList.remove('dragging');
+                });
+                
+                // Touch events para mobile/tablet
+                let touchStartY = 0;
+                let touchStartX = 0;
+                let isTouchDragging = false;
+                
+                card.addEventListener('touchstart', (e) => {
+                    const touch = e.touches[0];
+                    touchStartX = touch.clientX;
+                    touchStartY = touch.clientY;
+                    draggedCardId = card.dataset.id;
+                    isTouchDragging = true;
+                    
+                    setTimeout(() => {
+                        if (isTouchDragging) {
+                            card.classList.add('dragging');
+                            card.style.opacity = '0.5';
+                        }
+                    }, 100);
+                }, { passive: true });
+                
+                card.addEventListener('touchmove', (e) => {
+                    if (!isTouchDragging) return;
+                    
+                    const touch = e.touches[0];
+                    const deltaX = Math.abs(touch.clientX - touchStartX);
+                    const deltaY = Math.abs(touch.clientY - touchStartY);
+                    
+                    // Se moveu mais de 10px, considera como drag
+                    if (deltaX > 10 || deltaY > 10) {
+                        e.preventDefault();
+                        
+                        // Destacar coluna onde está o toque
+                        const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+                        document.querySelectorAll('.kanban-column .kanban-cards').forEach(col => {
+                            col.classList.remove('drag-over');
+                        });
+                        
+                        const column = elementBelow?.closest('.kanban-cards');
+                        if (column) {
+                            column.classList.add('drag-over');
+                        }
+                    }
+                }, { passive: false });
+                
+                card.addEventListener('touchend', async (e) => {
+                    if (!isTouchDragging) return;
+                    
+                    isTouchDragging = false;
+                    card.classList.remove('dragging');
+                    card.style.opacity = '1';
+                    
+                    const touch = e.changedTouches[0];
+                    const elementBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+                    const targetColumn = elementBelow?.closest('.kanban-cards');
+                    
+                    document.querySelectorAll('.kanban-column .kanban-cards').forEach(col => {
+                        col.classList.remove('drag-over');
+                    });
+                    
+                    if (targetColumn) {
+                        const newStatus = targetColumn.parentElement.id;
+                        const equipDoc = allKanbanEquipmentsDocs.find(d => d.id === draggedCardId);
+                        
+                        if (equipDoc && equipDoc.data().status !== newStatus) {
+                            if (newStatus === 'em-uso') {
+                                document.getElementById('checkout-equipment-id').value = draggedCardId;
+                                populateSelects();
+                                equipmentModal.classList.add('hidden');
+                                checkoutModal.classList.remove('hidden');
+                            } else {
+                                const updateData = {
+                                    status: newStatus,
+                                    user: null,
+                                    department: null,
+                                    checkoutDate: null,
+                                    maintenanceDate: newStatus === 'em-manutencao' ? serverTimestamp() : null
+                                };
+                                await updateDoc(doc(kanbanEquipmentsCollection, draggedCardId), updateData);
+                            }
+                        }
+                    }
+                    
+                    draggedCardId = null;
+                }, { passive: true });
+                
+                card.addEventListener('touchcancel', () => {
+                    isTouchDragging = false;
+                    card.classList.remove('dragging');
+                    card.style.opacity = '1';
+                    draggedCardId = null;
+                    document.querySelectorAll('.kanban-column .kanban-cards').forEach(col => {
+                        col.classList.remove('drag-over');
+                    });
                 });
             });
 
@@ -1618,29 +2009,181 @@
             singleError.classList.toggle('hidden', !message);
         }
 
+        async function cleanDuplicateItems() {
+            if (!confirm('Esta ação irá remover todos os códigos duplicados, mantendo apenas o registro mais recente de cada código. Deseja continuar?')) {
+                return;
+            }
+            
+            try {
+                cleanDuplicatesBtn.disabled = true;
+                cleanDuplicatesBtn.textContent = 'Limpando...';
+                
+                // Agrupar itens por código
+                const itemsByCode = {};
+                allItemsDocs.forEach(doc => {
+                    const code = doc.data().code?.toUpperCase() || '';
+                    if (!itemsByCode[code]) {
+                        itemsByCode[code] = [];
+                    }
+                    itemsByCode[code].push(doc);
+                });
+                
+                // Encontrar duplicados e deletar os mais antigos
+                const batch = writeBatch(db);
+                let deletedCount = 0;
+                
+                for (const code in itemsByCode) {
+                    const items = itemsByCode[code];
+                    if (items.length > 1) {
+                        // Ordenar por ID (os mais recentes têm IDs maiores)
+                        items.sort((a, b) => b.id.localeCompare(a.id));
+                        
+                        // Manter o primeiro (mais recente) e deletar os outros
+                        for (let i = 1; i < items.length; i++) {
+                            batch.delete(doc(itemsCollection, items[i].id));
+                            deletedCount++;
+                        }
+                    }
+                }
+                
+                await batch.commit();
+                alert(`${deletedCount} código(s) duplicado(s) removido(s) com sucesso!`);
+                
+            } catch (error) {
+                console.error("Erro ao limpar duplicados:", error);
+                alert("Erro ao limpar duplicados: " + error.message);
+            } finally {
+                cleanDuplicatesBtn.disabled = false;
+                cleanDuplicatesBtn.textContent = 'Limpar Duplicados';
+            }
+        }
+
 
         filterStatus.addEventListener('change', renderRequisitions);
         filterRequester.addEventListener('input', renderRequisitions);
         importExcelBtn.addEventListener('click', handleExcelImport);
-        itemSelect.addEventListener('change', () => {
-            try {
-                if (itemSelect.value) {
-                    selectedItemCodeInput.value = JSON.parse(itemSelect.value).code;
-                } else {
-                    selectedItemCodeInput.value = '';
-                }
-            } catch (e) {
-                selectedItemCodeInput.value = '';
-            }
-        });
+        cleanDuplicatesBtn.addEventListener('click', cleanDuplicateItems);
         requesterSelect.addEventListener('change', () => {
             const opt = requesterSelect.options[requesterSelect.selectedIndex];
             departmentInput.value = (opt && opt.value) ? opt.dataset.department : '';
         });
         
-        dashboardPeriodSelect.addEventListener('change', renderDashboard);
+        dashboardStartDate.addEventListener('change', renderDashboard);
+        dashboardEndDate.addEventListener('change', renderDashboard);
+        dashboardProductSelect.addEventListener('change', renderDashboard);
         dashboardRequesterSelect.addEventListener('change', renderDashboard);
         stockItemSearchInput.addEventListener('change', handleBarcodeSearch);
+        
+        // Event listener para popular endereços de origem ao selecionar item na transferência
+        transferItemSelect.addEventListener('change', () => {
+            transferFromAddress.innerHTML = '<option value="">Selecione a origem...</option>';
+            originQuantity.textContent = '';
+            transferToAddress.value = '';
+            transferQuantity.value = '';
+            
+            if (!transferItemSelect.value) return;
+            
+            try {
+                const itemData = JSON.parse(transferItemSelect.value);
+                const locations = allStockLocationsDocs.filter(doc => 
+                    doc.data().itemCode === itemData.code && doc.data().quantity > 0
+                );
+                
+                if (locations.length === 0) {
+                    transferFromAddress.innerHTML = '<option value="">Nenhum estoque disponível</option>';
+                    return;
+                }
+                
+                locations.forEach(locDoc => {
+                    const locData = locDoc.data();
+                    transferFromAddress.innerHTML += `<option value="${locDoc.id}">${locData.address} (Qtd: ${locData.quantity})</option>`;
+                });
+            } catch (e) {
+                console.error("Erro ao carregar localizações:", e);
+            }
+        });
+        
+        // Event listener para mostrar quantidade disponível no endereço de origem
+        transferFromAddress.addEventListener('change', () => {
+            originQuantity.textContent = '';
+            transferQuantity.value = '';
+            transferQuantity.max = '';
+            
+            if (!transferFromAddress.value) return;
+            
+            const fromLocation = allStockLocationsDocs.find(doc => doc.id === transferFromAddress.value);
+            if (fromLocation) {
+                const qty = fromLocation.data().quantity || 0;
+                originQuantity.textContent = `Quantidade disponível: ${qty}`;
+                transferQuantity.max = qty;
+            }
+        });
+        
+        // Pesquisa de itens no formulário de requisição
+        itemSearchInput.addEventListener('input', handleItemSearch);
+        itemSearchInput.addEventListener('focus', () => {
+            handleItemSearch(); // Sempre mostra a lista ao focar
+        });
+        
+        // Fechar dropdown ao clicar fora
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.item-search-container')) {
+                itemSearchDropdown.classList.remove('active');
+            }
+        });
+        
+        function handleItemSearch() {
+            const searchTerm = itemSearchInput.value.trim().toLowerCase();
+            
+            let filteredItems;
+            if (!searchTerm) {
+                // Se não houver pesquisa, mostra todos os itens ativos
+                filteredItems = allItemsDocs.filter(doc => doc.data().active !== false);
+            } else {
+                // Filtra conforme o termo de pesquisa (somente itens ativos)
+                filteredItems = allItemsDocs.filter(doc => {
+                    const data = doc.data();
+                    if (data.active === false) return false; // Não mostrar inativos
+                    const code = (data.code || '').toLowerCase();
+                    const description = (data.description || '').toLowerCase();
+                    return code.includes(searchTerm) || description.includes(searchTerm);
+                });
+            }
+            
+            itemSearchDropdown.innerHTML = '';
+            
+            if (filteredItems.length === 0) {
+                itemSearchDropdown.innerHTML = '<div class="item-search-option" style="color: #9ca3af; cursor: default;">Nenhum item encontrado</div>';
+                itemSearchDropdown.classList.add('active');
+                return;
+            }
+            
+            filteredItems.forEach(doc => {
+                const data = doc.data();
+                const optionDiv = document.createElement('div');
+                optionDiv.className = 'item-search-option';
+                optionDiv.innerHTML = `
+                    <div class="item-search-option-code">[${data.code}]</div>
+                    <div class="item-search-option-desc">${data.description}</div>
+                `;
+                optionDiv.addEventListener('click', () => selectItem(doc));
+                itemSearchDropdown.appendChild(optionDiv);
+            });
+            
+            itemSearchDropdown.classList.add('active');
+        }
+        
+        function selectItem(doc) {
+            const data = doc.data();
+            const optionValue = JSON.stringify({ id: doc.id, code: data.code, description: data.description });
+            
+            itemSelect.value = optionValue;
+            itemSearchInput.value = `[${data.code}] ${data.description}`;
+            selectedItemCodeInput.value = data.code;
+            
+            itemSearchDropdown.classList.remove('active');
+            itemSearchDropdown.innerHTML = '';
+        }
 
         function handleBarcodeSearch() {
             const codeToFind = stockItemSearchInput.value.trim();
