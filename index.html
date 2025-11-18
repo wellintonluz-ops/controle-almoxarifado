@@ -241,6 +241,36 @@
                 max-width: 10cm;
             }
         }
+        
+        /* Modal de Imagem Ampliada */
+        .image-modal {
+            display: none;
+            position: fixed;
+            z-index: 9999;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+            cursor: zoom-out;
+        }
+        
+        .image-modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .image-modal img {
+            max-width: 90%;
+            max-height: 90%;
+            object-fit: contain;
+            box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
+        }
+        
+        .catalog-img {
+            cursor: zoom-in;
+        }
     </style>
 </head>
 <body class="antialiased text-gray-800">
@@ -266,6 +296,7 @@
                 <button id="tab-labels" class="tab hidden">Gerar Etiquetas</button>
                 <button id="tab-items" class="tab hidden">Cadastro de Itens</button>
                 <button id="tab-employees" class="tab hidden">Cadastro de Funcionários</button>
+                <button id="tab-catalog" class="tab hidden">Catálogo de Produtos</button>
             </nav>
         </div>
         
@@ -563,6 +594,14 @@
                     <div class="md:col-span-1"><label for="item-code" class="block text-sm font-medium text-gray-700">Código</label><input type="text" id="item-code" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
                     <div class="md:col-span-2"><label for="item-description" class="block text-sm font-medium text-gray-700">Descrição</label><input type="text" id="item-description" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
                     <div class="md:col-span-1"><label for="item-safety-stock" class="block text-sm font-medium text-gray-700">Estoque Seg.</label><input type="number" id="item-safety-stock" min="0" value="0" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
+                    <div class="md:col-span-4">
+                        <label for="item-photo" class="block text-sm font-medium text-gray-700">Foto do Produto (Opcional)</label>
+                        <input type="file" id="item-photo" accept="image/*" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                        <div id="photo-preview" class="mt-2 hidden">
+                            <img id="photo-preview-img" src="" alt="Preview" class="max-w-xs max-h-40 rounded-md border border-gray-300">
+                            <button type="button" id="remove-photo-btn" class="mt-2 text-sm text-red-600 hover:text-red-800">Remover Foto</button>
+                        </div>
+                    </div>
                     <div class="md:col-span-4 text-right"><button type="submit" id="submit-item-btn" class="btn-primary font-semibold py-2 px-6 rounded-md shadow-sm" disabled>Salvar Item</button></div>
                 </form>
             </div>
@@ -611,6 +650,31 @@
                 </div>
             </div>
         </div>
+
+        <!-- Conteúdo da Aba Catálogo de Produtos -->
+        <div id="view-catalog" class="hidden">
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-xl font-semibold">Catálogo de Produtos</h2>
+                    <div class="flex gap-4 items-center">
+                        <label class="flex items-center gap-2">
+                            <input type="checkbox" id="catalog-show-inactive" class="rounded">
+                            <span class="text-sm text-gray-700">Mostrar Inativos</span>
+                        </label>
+                        <div id="loading-catalog" class="loader hidden"></div>
+                    </div>
+                </div>
+                <div id="catalog-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    <!-- Cards serão populados via JS -->
+                </div>
+                <p id="no-catalog-items" class="text-center text-gray-500 py-8 hidden">Nenhum produto encontrado.</p>
+            </div>
+        </div>
+        
+        <!-- Modal de Imagem Ampliada -->
+        <div id="image-modal" class="image-modal">
+            <img id="modal-image" src="" alt="Imagem Ampliada">
+        </div>
     </div>
 
     <!-- Modais -->
@@ -647,6 +711,14 @@
                 <div class="mb-4">
                     <label for="edit-item-safety-stock" class="block text-sm font-medium text-gray-700">Estoque de Segurança</label>
                     <input type="number" id="edit-item-safety-stock" min="0" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                </div>
+                <div class="mb-4">
+                    <label for="edit-item-photo" class="block text-sm font-medium text-gray-700">Foto do Produto (Opcional)</label>
+                    <input type="file" id="edit-item-photo" accept="image/*" class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                    <div id="edit-photo-preview" class="mt-2 hidden">
+                        <img id="edit-photo-preview-img" src="" alt="Preview" class="max-w-xs max-h-40 rounded-md border border-gray-300">
+                        <button type="button" id="remove-edit-photo-btn" class="mt-2 text-sm text-red-600 hover:text-red-800">Remover Foto</button>
+                    </div>
                 </div>
                 <div class="mt-6 flex justify-end space-x-4">
                     <button type="button" id="cancel-edit-item" class="py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">Cancelar</button>
@@ -704,6 +776,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
         // ************************************************************************************
         // CONFIGURAÇÃO DO SEU PROJETO FIREBASE
@@ -723,18 +796,20 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
+        const storage = getStorage(app);
         
         const loginLogoutBtn = document.getElementById('login-logout-btn');
         const tabDashboard = document.getElementById('tab-dashboard');
         const tabKanban = document.getElementById('tab-kanban');
         const tabLabels = document.getElementById('tab-labels');
-        const tabRequisitions = document.getElementById('tab-requisitions'), tabStock = document.getElementById('tab-stock'), tabItems = document.getElementById('tab-items'), tabEmployees = document.getElementById('tab-employees');
+        const tabRequisitions = document.getElementById('tab-requisitions'), tabStock = document.getElementById('tab-stock'), tabItems = document.getElementById('tab-items'), tabEmployees = document.getElementById('tab-employees'), tabCatalog = document.getElementById('tab-catalog');
         const viewDashboard = document.getElementById('view-dashboard');
         const viewKanban = document.getElementById('view-kanban');
         const viewLabels = document.getElementById('view-labels');
-        const viewRequisitions = document.getElementById('view-requisitions'), viewStock = document.getElementById('view-stock'), viewItems = document.getElementById('view-items'), viewEmployees = document.getElementById('view-employees');
+        const viewRequisitions = document.getElementById('view-requisitions'), viewStock = document.getElementById('view-stock'), viewItems = document.getElementById('view-items'), viewEmployees = document.getElementById('view-employees'), viewCatalog = document.getElementById('view-catalog');
         const requisitionForm = document.getElementById('requisition-form'), requisitionsListBody = document.getElementById('requisitions-list'), loadingRequisitions = document.getElementById('loading-requisitions'), noRequisitionsMessage = document.getElementById('no-requisitions'), filterStatus = document.getElementById('filter-status'), filterRequester = document.getElementById('filter-requester'), requesterSelect = document.getElementById('requester-select'), departmentInput = document.getElementById('department'), itemSelect = document.getElementById('item-select'), selectedItemCodeInput = document.getElementById('selected-item-code');
         const itemForm = document.getElementById('item-form'), itemsListBody = document.getElementById('items-list'), loadingItems = document.getElementById('loading-items'), noItemsMessage = document.getElementById('no-items'), submitItemBtn = document.getElementById('submit-item-btn'), excelFileInput = document.getElementById('excel-file-input'), importExcelBtn = document.getElementById('import-excel-btn'), importFeedback = document.getElementById('import-feedback'), cleanDuplicatesBtn = document.getElementById('clean-duplicates-btn');
+        const itemPhotoInput = document.getElementById('item-photo'), photoPreview = document.getElementById('photo-preview'), photoPreviewImg = document.getElementById('photo-preview-img'), removePhotoBtn = document.getElementById('remove-photo-btn');
         const employeeForm = document.getElementById('employee-form'), employeesListBody = document.getElementById('employees-list'), loadingEmployees = document.getElementById('loading-employees'), noEmployeesMessage = document.getElementById('no-employees'), submitEmployeeBtn = document.getElementById('submit-employee-btn');
         const statusModal = document.getElementById('status-modal'), statusSelect = document.getElementById('status-select'), modalRequisitionId = document.getElementById('modal-requisition-id'), modalOriginalStatus = document.getElementById('modal-original-status'), cancelUpdateBtn = document.getElementById('cancel-update'), confirmUpdateBtn = document.getElementById('confirm-update');
         const loginModal = document.getElementById('login-modal'), loginForm = document.getElementById('login-form'), cancelLoginBtn = document.getElementById('cancel-login'), loginError = document.getElementById('login-error');
@@ -746,6 +821,10 @@
         const dashboardEndDate = document.getElementById('dashboard-end-date');
         const dashboardProductSelect = document.getElementById('dashboard-product');
         const dashboardRequesterSelect = document.getElementById('dashboard-requester');
+        const catalogGrid = document.getElementById('catalog-grid');
+        const catalogShowInactive = document.getElementById('catalog-show-inactive');
+        const noCatalogItems = document.getElementById('no-catalog-items');
+        const loadingCatalog = document.getElementById('loading-catalog');
         const consumptionChartCanvas = document.getElementById('consumption-chart');
         const itemSearchInput = document.getElementById('item-search-input');
         const itemSearchDropdown = document.getElementById('item-search-dropdown');
@@ -784,6 +863,8 @@
         let allRequisitionsDocs = [], allItemsDocs = [], allEmployeesDocs = [], allStockLocationsDocs = [], allKanbanEquipmentsDocs = [];
         let consumptionChart = null;
         let formListenersAttached = false; // Flag para evitar duplicação de listeners
+        let selectedPhotoFile = null; // Armazena o arquivo de foto selecionado
+        let shouldRemoveEditPhoto = false; // Flag para indicar remoção de foto na edição
 
 
         // Verifica se o usuário já estava logado na sessão
@@ -831,7 +912,7 @@
             loadingEmployees.classList.remove('hidden'); onSnapshot(query(employeesCollection), s => { allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name)); renderEmployees(); populateSelects(); loadingEmployees.classList.add('hidden'); }); 
             
             loadingItems.classList.remove('hidden');
-            onSnapshot(query(itemsCollection), s => { allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description)); renderItems(); populateSelects(); loadingItems.classList.add('hidden'); });
+            onSnapshot(query(itemsCollection), s => { allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description)); renderItems(); renderStock(); populateSelects(); loadingItems.classList.add('hidden'); });
             
             loadingStock.classList.remove('hidden');
             onSnapshot(query(stockLocationsCollection), s => { allStockLocationsDocs = s.docs.sort((a,b) => a.data().address.localeCompare(b.data().address)); renderStock(); renderItems(); loadingStock.classList.add('hidden'); });
@@ -938,6 +1019,7 @@
                 
                 const description = item ? item.data().description : "Item não encontrado";
                 const safetyStock = item ? (item.data().safetyStock || 0) : 0;
+                const photoBase64 = item ? item.data().photoBase64 : null;
 
                 const totalStock = allStockLocationsDocs
                     .filter(loc => loc.data().itemCode === locData.itemCode)
@@ -950,7 +1032,28 @@
                     stockClass = 'bg-yellow-100 hover:bg-yellow-200';
                 }
                 
-                stockListBody.innerHTML += `<tr class="${stockClass}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${locData.itemCode}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${description}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${locData.address}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-700">${safetyStock}</td><td class="px-6 py-4 whitespace-nowrap text-center text-lg font-bold">${locData.quantity}</td></tr>`;
+                const row = document.createElement('tr');
+                row.className = stockClass;
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 ${photoBase64 ? 'cursor-pointer hover:text-blue-600 hover:underline' : ''}" data-photo="${photoBase64 || ''}">${locData.itemCode}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${description}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${locData.address}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-700">${safetyStock}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-center text-lg font-bold">${locData.quantity}</td>
+                `;
+                
+                // Adicionar evento de clique no código se tiver foto
+                if (photoBase64) {
+                    const codeCell = row.querySelector('td[data-photo]');
+                    codeCell.addEventListener('click', () => {
+                        const imageModal = document.getElementById('image-modal');
+                        const modalImage = document.getElementById('modal-image');
+                        modalImage.src = photoBase64;
+                        imageModal.classList.add('active');
+                    });
+                }
+                
+                stockListBody.appendChild(row);
             });
         };
         
@@ -1022,7 +1125,7 @@
             const isReady = isFirestoreReady;
             const isAdmin = isLoggedIn;
 
-            const tabs = [tabDashboard, tabStock, tabKanban, tabLabels, tabItems, tabEmployees];
+            const tabs = [tabDashboard, tabStock, tabKanban, tabLabels, tabItems, tabEmployees, tabCatalog];
             if (isAdmin) {
                 loginLogoutBtn.textContent = 'Logout';
                 loginLogoutBtn.classList.replace('btn-primary', 'btn-secondary');
@@ -1032,7 +1135,7 @@
                 loginLogoutBtn.classList.replace('btn-secondary', 'btn-primary');
                 tabs.forEach(t => t.classList.add('hidden'));
                 if (tabs.some(t => t.classList.contains('tab-active'))) {
-                    handleTabClick(tabRequisitions, viewRequisitions, tabs, [viewDashboard, viewKanban, viewLabels, viewStock, viewItems, viewEmployees]);
+                    handleTabClick(tabRequisitions, viewRequisitions, tabs, [viewDashboard, viewKanban, viewLabels, viewStock, viewItems, viewEmployees, viewCatalog]);
                 }
             }
             
@@ -1099,13 +1202,42 @@
                     return;
                 }
                 
-                await addDoc(itemsCollection, { 
-                    code: codeInput.value.trim(), 
-                    description: document.getElementById('item-description').value.trim(),
-                    safetyStock: Number(document.getElementById('item-safety-stock').value) || 0,
-                    active: true
-                }); 
-                itemForm.reset(); 
+                // Converter foto para Base64 (sem usar Storage - 100% gratuito)
+                let photoBase64 = null;
+                const photoInput = document.getElementById('item-photo');
+                if (photoInput.files && photoInput.files[0]) {
+                    const file = photoInput.files[0];
+                    
+                    // Validar tamanho (max 800KB para evitar problemas no Firestore)
+                    if (file.size > 800 * 1024) {
+                        alert('A foto é muito grande! Por favor, escolha uma imagem menor que 800KB.');
+                        return;
+                    }
+                    
+                    // Converter para Base64
+                    photoBase64 = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(file);
+                    });
+                }
+                
+                try {
+                    await addDoc(itemsCollection, { 
+                        code: codeInput.value.trim(), 
+                        description: document.getElementById('item-description').value.trim(),
+                        safetyStock: Number(document.getElementById('item-safety-stock').value) || 0,
+                        active: true,
+                        photoBase64: photoBase64
+                    }); 
+                    itemForm.reset();
+                    document.getElementById('photo-preview').classList.add('hidden');
+                    selectedPhotoFile = null;
+                } catch (error) {
+                    console.error('Erro ao salvar item:', error);
+                    alert('Erro ao salvar o item: ' + error.message);
+                }
             });
 
             employeeForm.addEventListener('submit', async (e) => {
@@ -1310,6 +1442,21 @@
                 document.getElementById('edit-item-code').value = itemData.code;
                 document.getElementById('edit-item-description').value = itemData.description;
                 document.getElementById('edit-item-safety-stock').value = itemData.safetyStock || 0;
+                
+                // Resetar flags e inputs
+                shouldRemoveEditPhoto = false;
+                document.getElementById('edit-item-photo').value = '';
+                
+                // Mostrar foto atual se existir
+                const editPhotoPreview = document.getElementById('edit-photo-preview');
+                const editPhotoPreviewImg = document.getElementById('edit-photo-preview-img');
+                if (itemData.photoBase64) {
+                    editPhotoPreviewImg.src = itemData.photoBase64;
+                    editPhotoPreview.classList.remove('hidden');
+                } else {
+                    editPhotoPreview.classList.add('hidden');
+                }
+                
                 editItemModal.classList.remove('hidden');
             }
         }
@@ -1324,10 +1471,39 @@
                 description: document.getElementById('edit-item-description').value,
                 safetyStock: Number(document.getElementById('edit-item-safety-stock').value) || 0
             };
+            
+            // Se marcou para remover foto
+            if (shouldRemoveEditPhoto) {
+                updatedData.photoBase64 = null;
+            }
+            // Verificar se tem nova foto
+            else {
+                const editPhotoInput = document.getElementById('edit-item-photo');
+                if (editPhotoInput.files && editPhotoInput.files[0]) {
+                    const file = editPhotoInput.files[0];
+                    
+                    // Validar tamanho (max 800KB)
+                    if (file.size > 800 * 1024) {
+                        alert('A foto é muito grande! Por favor, escolha uma imagem menor que 800KB.');
+                        return;
+                    }
+                    
+                    // Converter para Base64
+                    const photoBase64 = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(file);
+                    });
+                    
+                    updatedData.photoBase64 = photoBase64;
+                }
+            }
 
             try {
                 await updateDoc(itemRef, updatedData);
                 editItemModal.classList.add('hidden');
+                shouldRemoveEditPhoto = false;
             } catch (error) {
                 console.error("Erro ao atualizar o item: ", error);
                 alert("Falha ao atualizar o item.");
@@ -1815,9 +1991,14 @@
             activeTab.classList.add('tab-active');
             inactiveViews.forEach(v => v.classList.add('hidden'));
             inactiveTabs.forEach(t => t.classList.remove('tab-active'));
+            
+            // Se a aba do catálogo foi clicada, renderizar
+            if (activeView === viewCatalog) {
+                renderCatalog();
+            }
         }
-        const allTabs = [tabDashboard, tabRequisitions, tabStock, tabKanban, tabLabels, tabItems, tabEmployees];
-        const allViews = [viewDashboard, viewRequisitions, viewStock, viewKanban, viewLabels, viewItems, viewEmployees];
+        const allTabs = [tabDashboard, tabRequisitions, tabStock, tabKanban, tabLabels, tabItems, tabEmployees, tabCatalog];
+        const allViews = [viewDashboard, viewRequisitions, viewStock, viewKanban, viewLabels, viewItems, viewEmployees, viewCatalog];
         allTabs.forEach((tab, index) => {
             tab.addEventListener('click', () => handleTabClick(tab, allViews[index], allTabs.filter(t => t !== tab), allViews.filter(v => v !== allViews[index])));
         });
@@ -2087,6 +2268,53 @@
             departmentInput.value = (opt && opt.value) ? opt.dataset.department : '';
         });
         
+        // Event listener para preview de foto
+        itemPhotoInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                selectedPhotoFile = file;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    photoPreviewImg.src = event.target.result;
+                    photoPreview.classList.remove('hidden');
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        removePhotoBtn.addEventListener('click', () => {
+            itemPhotoInput.value = '';
+            selectedPhotoFile = null;
+            photoPreview.classList.add('hidden');
+            photoPreviewImg.src = '';
+        });
+        
+        // Event listeners para edição de foto
+        const editItemPhotoInput = document.getElementById('edit-item-photo');
+        const editPhotoPreview = document.getElementById('edit-photo-preview');
+        const editPhotoPreviewImg = document.getElementById('edit-photo-preview-img');
+        const removeEditPhotoBtn = document.getElementById('remove-edit-photo-btn');
+        
+        editItemPhotoInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                shouldRemoveEditPhoto = false; // Resetar flag se escolher nova foto
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    editPhotoPreviewImg.src = event.target.result;
+                    editPhotoPreview.classList.remove('hidden');
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        removeEditPhotoBtn.addEventListener('click', () => {
+            editItemPhotoInput.value = '';
+            editPhotoPreview.classList.add('hidden');
+            editPhotoPreviewImg.src = '';
+            shouldRemoveEditPhoto = true; // Marcar que deve remover a foto ao salvar
+        });
+        
         dashboardStartDate.addEventListener('change', renderDashboard);
         dashboardEndDate.addEventListener('change', renderDashboard);
         dashboardProductSelect.addEventListener('change', renderDashboard);
@@ -2224,6 +2452,89 @@
                 stockItemSearchInput.focus();
             }
         }
+        
+        function renderCatalog() {
+            const showInactive = catalogShowInactive.checked;
+            catalogGrid.innerHTML = '';
+            
+            let filteredItems = allItemsDocs.filter(doc => {
+                const data = doc.data();
+                return showInactive || data.active !== false;
+            });
+            
+            noCatalogItems.classList.toggle('hidden', filteredItems.length > 0);
+            
+            filteredItems.forEach(doc => {
+                const data = doc.data();
+                const id = doc.id;
+                
+                // Calcular estoque total
+                const totalStock = allStockLocationsDocs
+                    .filter(stockDoc => stockDoc.data().itemCode === data.code)
+                    .reduce((sum, stockDoc) => sum + (stockDoc.data().quantity || 0), 0);
+                
+                // Usar Base64 ou placeholder se não tiver foto
+                const photoSrc = data.photoBase64 || 'https://via.placeholder.com/300x200?text=Sem+Foto';
+                
+                const statusBadge = data.active === false 
+                    ? '<span class="inline-block px-2 py-1 text-xs font-semibold text-red-800 bg-red-100 rounded-full">Inativo</span>'
+                    : '<span class="inline-block px-2 py-1 text-xs font-semibold text-green-800 bg-green-100 rounded-full">Ativo</span>';
+                
+                const stockBadge = totalStock === 0
+                    ? '<span class="text-red-600 font-semibold">Estoque: 0</span>'
+                    : totalStock < data.safetyStock
+                    ? `<span class="text-yellow-600 font-semibold">Estoque: ${totalStock}</span>`
+                    : `<span class="text-green-600 font-semibold">Estoque: ${totalStock}</span>`;
+                
+                // Verificar se tem foto real ou é placeholder
+                const hasPhoto = data.photoBase64 && !data.photoBase64.includes('placeholder');
+                
+                const card = document.createElement('div');
+                card.className = 'bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow';
+                card.innerHTML = `
+                    <div class="aspect-w-16 aspect-h-9 bg-gray-200 flex items-center justify-center">
+                        ${hasPhoto 
+                            ? `<img src="${photoSrc}" alt="" class="catalog-img w-full h-48 object-cover" data-fullsrc="${photoSrc}">` 
+                            : `<div class="w-full h-48 flex items-center justify-center text-gray-400 text-sm">Sem Foto</div>`
+                        }
+                    </div>
+                    <div class="p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="text-lg font-bold text-gray-900">${data.code}</h3>
+                            ${statusBadge}
+                        </div>
+                        <p class="text-sm text-gray-700 mb-3">${data.description}</p>
+                        <div class="flex justify-between items-center text-sm">
+                            ${stockBadge}
+                            <span class="text-gray-500">Seg: ${data.safetyStock || 0}</span>
+                        </div>
+                    </div>
+                `;
+                
+                // Adicionar evento de clique na imagem (somente se tiver foto)
+                if (hasPhoto) {
+                    const imgElement = card.querySelector('.catalog-img');
+                    imgElement.addEventListener('click', () => {
+                        const imageModal = document.getElementById('image-modal');
+                        const modalImage = document.getElementById('modal-image');
+                        modalImage.src = photoSrc;
+                        imageModal.classList.add('active');
+                    });
+                }
+                
+                catalogGrid.appendChild(card);
+            });
+        }
+        
+        // Event listener para fechar modal de imagem
+        const imageModal = document.getElementById('image-modal');
+        if (imageModal) {
+            imageModal.addEventListener('click', () => {
+                imageModal.classList.remove('active');
+            });
+        }
+        
+        catalogShowInactive.addEventListener('change', renderCatalog);
 
         setupAuthAndFirestore();
     </script>
