@@ -1168,22 +1168,36 @@
             
             requisitionForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const item = JSON.parse(itemSelect.value);
-                await addDoc(requisitionsCollection, {
-                    requester: requesterSelect.value,
-                    department: departmentInput.value,
-                    itemCode: item.code,
-                    itemDescription: item.description,
-                    quantity: Number(requisitionForm.quantity.value),
-                    justification: requisitionForm.justification.value,
-                    status: 'Pendente',
-                    createdAt: serverTimestamp()
-                });
-                requisitionForm.reset();
-                selectedItemCodeInput.value = '';
-                departmentInput.value = '';
-                itemSearchInput.value = '';
-                itemSearchDropdown.classList.remove('active');
+                e.stopPropagation();
+                
+                // Desabilitar botão temporariamente para evitar cliques duplos
+                const submitBtn = e.target.querySelector('button[type="submit"]');
+                if (submitBtn.disabled) return;
+                submitBtn.disabled = true;
+                
+                try {
+                    const item = JSON.parse(itemSelect.value);
+                    await addDoc(requisitionsCollection, {
+                        requester: requesterSelect.value,
+                        department: departmentInput.value,
+                        itemCode: item.code,
+                        itemDescription: item.description,
+                        quantity: Number(requisitionForm.quantity.value),
+                        justification: requisitionForm.justification.value,
+                        status: 'Pendente',
+                        createdAt: serverTimestamp()
+                    });
+                    requisitionForm.reset();
+                    selectedItemCodeInput.value = '';
+                    departmentInput.value = '';
+                    itemSearchInput.value = '';
+                    itemSearchDropdown.classList.remove('active');
+                } finally {
+                    // Reabilitar botão após 1 segundo
+                    setTimeout(() => {
+                        submitBtn.disabled = false;
+                    }, 1000);
+                }
             });
             
             itemForm.addEventListener('submit', async (e) => { 
