@@ -341,7 +341,7 @@
                     <div class="md:col-span-3"><label for="requester-select" class="block text-sm font-medium text-gray-700">Solicitante</label><select id="requester-select" name="requester" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"><option value="">Selecione um funcionário...</option></select></div>
                     <div class="md:col-span-3"><label for="department" class="block text-sm font-medium text-gray-700">Departamento</label><input type="text" id="department" name="department" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 focus:outline-none sm:text-sm"></div>
                     <div class="md:col-span-3 item-search-container"><label for="item-search-input" class="block text-sm font-medium text-gray-700">Item Solicitado</label><input type="text" id="item-search-input" placeholder="Digite para pesquisar..." autocomplete="off" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"><div id="item-search-dropdown" class="item-search-dropdown"></div><input type="hidden" id="item-select" name="item-select" required></div>
-                    <div class="md:col-span-2"><label for="selected-item-code" class="block text-sm font-medium text-gray-700">Código do Item</label><input type="text" id="selected-item-code" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 focus:outline-none sm:text-sm"></div>
+                    <div class="md:col-span-2"><label for="selected-item-code" class="block text-sm font-medium text-gray-700">Código do Item</label><input type="text" id="selected-item-code" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 focus:outline-none sm:text-sm cursor-pointer hover:bg-gray-200" title="Clique para ver a foto"></div>
                     <div class="md:col-span-1"><label for="quantity" class="block text-sm font-medium text-gray-700">Quantidade</label><input type="number" id="quantity" name="quantity" min="1" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
                     <div class="md:col-span-6"><label for="justification" class="block text-sm font-medium text-gray-700">Justificativa</label><textarea id="justification" name="justification" rows="3" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></textarea></div>
                     <div class="md:col-span-6 text-right"><button type="submit" class="btn-primary font-semibold py-2 px-6 rounded-md shadow-sm" disabled>Enviar Requisição</button></div>
@@ -2321,6 +2321,17 @@
         dashboardRequesterSelect.addEventListener('change', renderDashboard);
         stockItemSearchInput.addEventListener('change', handleBarcodeSearch);
         
+        // Event listener para clicar no código do item na requisição
+        selectedItemCodeInput.addEventListener('click', () => {
+            const photoBase64 = selectedItemCodeInput.dataset.photo;
+            if (photoBase64) {
+                const imageModal = document.getElementById('image-modal');
+                const modalImage = document.getElementById('modal-image');
+                modalImage.src = photoBase64;
+                imageModal.classList.add('active');
+            }
+        });
+        
         // Event listener para popular endereços de origem ao selecionar item na transferência
         transferItemSelect.addEventListener('change', () => {
             transferFromAddress.innerHTML = '<option value="">Selecione a origem...</option>';
@@ -2427,6 +2438,9 @@
             itemSelect.value = optionValue;
             itemSearchInput.value = `[${data.code}] ${data.description}`;
             selectedItemCodeInput.value = data.code;
+            
+            // Armazenar a foto do item selecionado
+            selectedItemCodeInput.dataset.photo = data.photoBase64 || '';
             
             itemSearchDropdown.classList.remove('active');
             itemSearchDropdown.innerHTML = '';
