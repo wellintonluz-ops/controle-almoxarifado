@@ -907,17 +907,59 @@
             }
         }
         
+        // Debounce para evitar renderizações múltiplas
+        let renderTimeout = null;
+        function debouncedRender(fn, delay = 100) {
+            clearTimeout(renderTimeout);
+            renderTimeout = setTimeout(fn, delay);
+        }
+        
         function listenToAllCollections() {
-            loadingRequisitions.classList.remove('hidden'); onSnapshot(query(requisitionsCollection), s => { allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0)); renderRequisitions(); renderDashboard(); loadingRequisitions.classList.add('hidden'); }); 
-            loadingEmployees.classList.remove('hidden'); onSnapshot(query(employeesCollection), s => { allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name)); renderEmployees(); populateSelects(); loadingEmployees.classList.add('hidden'); }); 
+            loadingRequisitions.classList.remove('hidden'); 
+            onSnapshot(query(requisitionsCollection), s => { 
+                allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0)); 
+                debouncedRender(() => {
+                    renderRequisitions(); 
+                    renderDashboard(); 
+                });
+                loadingRequisitions.classList.add('hidden'); 
+            }); 
+            
+            loadingEmployees.classList.remove('hidden'); 
+            onSnapshot(query(employeesCollection), s => { 
+                allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name)); 
+                debouncedRender(() => {
+                    renderEmployees(); 
+                    populateSelects(); 
+                });
+                loadingEmployees.classList.add('hidden'); 
+            }); 
             
             loadingItems.classList.remove('hidden');
-            onSnapshot(query(itemsCollection), s => { allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description)); renderItems(); renderStock(); populateSelects(); loadingItems.classList.add('hidden'); });
+            onSnapshot(query(itemsCollection), s => { 
+                allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description)); 
+                debouncedRender(() => {
+                    renderItems(); 
+                    renderStock(); 
+                    populateSelects(); 
+                });
+                loadingItems.classList.add('hidden'); 
+            });
             
             loadingStock.classList.remove('hidden');
-            onSnapshot(query(stockLocationsCollection), s => { allStockLocationsDocs = s.docs.sort((a,b) => a.data().address.localeCompare(b.data().address)); renderStock(); renderItems(); loadingStock.classList.add('hidden'); });
+            onSnapshot(query(stockLocationsCollection), s => { 
+                allStockLocationsDocs = s.docs.sort((a,b) => a.data().address.localeCompare(b.data().address)); 
+                debouncedRender(() => {
+                    renderStock(); 
+                    renderItems(); 
+                });
+                loadingStock.classList.add('hidden'); 
+            });
         
-            onSnapshot(query(kanbanEquipmentsCollection), s => { allKanbanEquipmentsDocs = s.docs; renderKanbanBoard(); });
+            onSnapshot(query(kanbanEquipmentsCollection), s => { 
+                allKanbanEquipmentsDocs = s.docs; 
+                debouncedRender(() => renderKanbanBoard());
+            });
         }
 
         const renderRequisitions = () => {
@@ -963,6 +1005,10 @@
                 return codeA.localeCompare(codeB);
             });
             
+            // Usar DocumentFragment para melhor performance
+            const fragment = document.createDocumentFragment();
+            const tempDiv = document.createElement('div');
+            
             sortedItems.forEach(doc => {
                 const itemData = doc.data();
                 const isActive = itemData.active !== false; // Por padrão é ativo se não definido
@@ -985,8 +1031,12 @@
                 const toggleText = isActive ? 'Inativar' : 'Ativar';
                 const toggleClass = isActive ? 'text-orange-600 hover:text-orange-900' : 'text-green-600 hover:text-green-900';
 
-                itemsListBody.innerHTML += `<tr class="${stockClass}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${itemData.code}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemData.description}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">${safetyStock}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm font-semibold">${totalStock}</td><td class="px-6 py-4 whitespace-nowrap text-center"><span class="status-badge ${statusClass}">${statusText}</span></td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${isLoggedIn ? `<button data-id="${doc.id}" class="edit-item-btn text-blue-600 hover:text-blue-900 mr-4">Editar</button><button data-id="${doc.id}" data-active="${isActive}" class="toggle-item-btn ${toggleClass} mr-4">${toggleText}</button><button data-id="${doc.id}" class="delete-item-btn text-red-600 hover:text-red-900">Excluir</button>`: ''}</td></tr>`;
+                tempDiv.innerHTML = `<tr class="${stockClass}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${itemData.code}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemData.description}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">${safetyStock}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm font-semibold">${totalStock}</td><td class="px-6 py-4 whitespace-nowrap text-center"><span class="status-badge ${statusClass}">${statusText}</span></td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${isLoggedIn ? `<button data-id="${doc.id}" class="edit-item-btn text-blue-600 hover:text-blue-900 mr-4">Editar</button><button data-id="${doc.id}" data-active="${isActive}" class="toggle-item-btn ${toggleClass} mr-4">${toggleText}</button><button data-id="${doc.id}" class="delete-item-btn text-red-600 hover:text-red-900">Excluir</button>`: ''}</td></tr>`;
+                fragment.appendChild(tempDiv.firstChild);
             });
+            
+            itemsListBody.appendChild(fragment);
+            
             document.querySelectorAll('.edit-item-btn').forEach(b => b.addEventListener('click', (e) => openEditItemModal(e.target)));
             document.querySelectorAll('.toggle-item-btn').forEach(b => b.addEventListener('click', async (e) => toggleItemActive(e.target)));
             document.querySelectorAll('.delete-item-btn').forEach(b => b.addEventListener('click', async (e) => { if (confirm('Excluir este item e todos os seus registros de estoque?')) await deleteDoc(doc(itemsCollection, e.target.dataset.id)); }));
