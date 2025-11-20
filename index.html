@@ -354,6 +354,11 @@
                     <div class="flex-1 mt-4 md:mt-0"><label for="filter-requester" class="block text-sm font-medium text-gray-700">Filtrar por Solicitante</label><input type="text" id="filter-requester" placeholder="Digite o nome..." class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
                 </div>
                 <div class="overflow-x-auto"><table class="min-w-full divide-y divide-gray-200"><thead class="bg-gray-50"><tr><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Solicitante</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qtd.</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Última Atualização</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th></tr></thead><tbody id="requisitions-list" class="bg-white divide-y divide-gray-200"></tbody></table><p id="no-requisitions" class="text-center text-gray-500 py-8 hidden">Nenhuma requisição encontrada.</p></div>
+                <div id="requisitions-pagination" class="flex justify-between items-center mt-4 hidden">
+                    <button id="prev-page" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed" disabled>Anterior</button>
+                    <span id="page-info" class="text-sm text-gray-600">Página 1</span>
+                    <button id="next-page" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed">Próxima</button>
+                </div>
             </div>
         </div>
 
@@ -865,6 +870,8 @@
         let formListenersAttached = false; // Flag para evitar duplicação de listeners
         let selectedPhotoFile = null; // Armazena o arquivo de foto selecionado
         let shouldRemoveEditPhoto = false; // Flag para indicar remoção de foto na edição
+        let currentRequisitionsPage = 1;
+        const requisitionsPerPage = 20;
 
 
         // Verifica se o usuário já estava logado na sessão
@@ -917,58 +924,76 @@
         function listenToAllCollections() {
             loadingRequisitions.classList.remove('hidden'); 
             onSnapshot(query(requisitionsCollection), s => { 
+                console.log('Requisições carregadas:', s.docs.length);
                 allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0)); 
-                debouncedRender(() => {
-                    renderRequisitions(); 
-                    renderDashboard(); 
-                });
+                renderRequisitions(); 
+                renderDashboard();
                 loadingRequisitions.classList.add('hidden'); 
             }); 
             
             loadingEmployees.classList.remove('hidden'); 
             onSnapshot(query(employeesCollection), s => { 
                 allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name)); 
-                debouncedRender(() => {
-                    renderEmployees(); 
-                    populateSelects(); 
-                });
+                renderEmployees(); 
+                populateSelects();
                 loadingEmployees.classList.add('hidden'); 
             }); 
             
             loadingItems.classList.remove('hidden');
             onSnapshot(query(itemsCollection), s => { 
                 allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description)); 
-                debouncedRender(() => {
-                    renderItems(); 
-                    renderStock(); 
-                    populateSelects(); 
-                });
+                renderItems(); 
+                renderStock(); 
+                populateSelects();
                 loadingItems.classList.add('hidden'); 
             });
             
             loadingStock.classList.remove('hidden');
             onSnapshot(query(stockLocationsCollection), s => { 
                 allStockLocationsDocs = s.docs.sort((a,b) => a.data().address.localeCompare(b.data().address)); 
-                debouncedRender(() => {
-                    renderStock(); 
-                    renderItems(); 
-                });
+                renderStock(); 
+                renderItems();
                 loadingStock.classList.add('hidden'); 
             });
         
             onSnapshot(query(kanbanEquipmentsCollection), s => { 
                 allKanbanEquipmentsDocs = s.docs; 
-                debouncedRender(() => renderKanbanBoard());
+                renderKanbanBoard();
             });
         }
 
         const renderRequisitions = () => {
+            console.log('renderRequisitions chamado, total docs:', allRequisitionsDocs.length);
             const statusFilter = filterStatus.value;
             const requesterFilter = filterRequester.value.trim().toLowerCase();
             requisitionsListBody.innerHTML = '';
+            
             let filteredDocs = allRequisitionsDocs.filter(doc => (statusFilter === 'Todos' || doc.data().status === statusFilter) && (!requesterFilter || doc.data().requester.toLowerCase().includes(requesterFilter)));
+            console.log('Docs filtrados:', filteredDocs.length);
             noRequisitionsMessage.classList.toggle('hidden', filteredDocs.length > 0);
-            filteredDocs.forEach(doc => {
+            
+            // Paginação
+            const totalPages = Math.ceil(filteredDocs.length / requisitionsPerPage);
+            const startIndex = (currentRequisitionsPage - 1) * requisitionsPerPage;
+            const endIndex = startIndex + requisitionsPerPage;
+            const paginatedDocs = filteredDocs.slice(startIndex, endIndex);
+            
+            // Atualizar controles de paginação
+            const paginationDiv = document.getElementById('requisitions-pagination');
+            const prevBtn = document.getElementById('prev-page');
+            const nextBtn = document.getElementById('next-page');
+            const pageInfo = document.getElementById('page-info');
+            
+            if (filteredDocs.length > requisitionsPerPage) {
+                paginationDiv.classList.remove('hidden');
+                prevBtn.disabled = currentRequisitionsPage === 1;
+                nextBtn.disabled = currentRequisitionsPage >= totalPages;
+                pageInfo.textContent = `Página ${currentRequisitionsPage} de ${totalPages} (${filteredDocs.length} requisições)`;
+            } else {
+                paginationDiv.classList.add('hidden');
+            }
+            
+            paginatedDocs.forEach(doc => {
                 const data = doc.data();
                 const id = doc.id;
                 const date = data.createdAt?.toDate().toLocaleDateString('pt-BR') || 'N/A';
@@ -977,6 +1002,34 @@
                 requisitionsListBody.innerHTML += `<tr class="hover:bg-gray-50"><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${date}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${data.requester}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemDisplay}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${data.quantity}</td><td class="px-6 py-4 whitespace-nowrap"><span class="status-badge status-${data.status.toLowerCase()}">${data.status}</span></td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${updatedAtText}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium"><button data-id="${id}" data-status="${data.status}" class="update-status-btn ${!isLoggedIn ? 'text-gray-400 cursor-not-allowed' : 'text-blue-600 hover:text-blue-900'}" ${!isLoggedIn ? 'disabled' : ''}>Alterar</button></td></tr>`;
             });
             document.querySelectorAll('.update-status-btn:not([disabled])').forEach(b => b.addEventListener('click', (e) => openStatusModal(e.target)));
+            
+            // Configurar listeners de paginação (apenas uma vez)
+            if (!window.paginationListenersSet) {
+                const prevBtn = document.getElementById('prev-page');
+                const nextBtn = document.getElementById('next-page');
+                
+                if (prevBtn && nextBtn) {
+                    prevBtn.addEventListener('click', () => {
+                        if (currentRequisitionsPage > 1) {
+                            currentRequisitionsPage--;
+                            renderRequisitions();
+                        }
+                    });
+                    
+                    nextBtn.addEventListener('click', () => {
+                        const statusFilter = filterStatus.value;
+                        const requesterFilter = filterRequester.value.trim().toLowerCase();
+                        const filteredCount = allRequisitionsDocs.filter(doc => (statusFilter === 'Todos' || doc.data().status === statusFilter) && (!requesterFilter || doc.data().requester.toLowerCase().includes(requesterFilter))).length;
+                        const totalPages = Math.ceil(filteredCount / requisitionsPerPage);
+                        if (currentRequisitionsPage < totalPages) {
+                            currentRequisitionsPage++;
+                            renderRequisitions();
+                        }
+                    });
+                    
+                    window.paginationListenersSet = true;
+                }
+            }
         };
 
         const renderItems = () => {
@@ -2323,8 +2376,15 @@
         }
 
 
-        filterStatus.addEventListener('change', renderRequisitions);
-        filterRequester.addEventListener('input', renderRequisitions);
+        filterStatus.addEventListener('change', () => {
+            currentRequisitionsPage = 1;
+            renderRequisitions();
+        });
+        filterRequester.addEventListener('input', () => {
+            currentRequisitionsPage = 1;
+            renderRequisitions();
+        });
+        
         importExcelBtn.addEventListener('click', handleExcelImport);
         cleanDuplicatesBtn.addEventListener('click', cleanDuplicateItems);
         requesterSelect.addEventListener('change', () => {
