@@ -348,7 +348,15 @@
                 </form>
             </div>
             <div class="bg-white p-6 rounded-lg shadow-md">
-                <div class="flex justify-between items-center mb-4"><h2 class="text-xl font-semibold">Lista de Requisições</h2><div id="loading-requisitions" class="loader"></div></div>
+                <div class="flex justify-between items-center mb-4">
+                    <div class="flex items-center space-x-3">
+                        <h2 class="text-xl font-semibold">Lista de Requisições</h2>
+                        <div id="pending-badge" class="hidden bg-yellow-100 border-2 border-yellow-400 text-yellow-800 px-3 py-1 rounded-lg font-semibold text-sm shadow-sm transition-all">
+                            <span id="pending-count">0</span> pendentes
+                        </div>
+                    </div>
+                    <div id="loading-requisitions" class="loader"></div>
+                </div>
                 <div class="flex flex-col md:flex-row md:space-x-4 mb-4">
                     <div class="flex-1"><label for="filter-status" class="block text-sm font-medium text-gray-700">Filtrar por Status</label><select id="filter-status" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"><option>Todos</option><option>Pendente</option><option>Rejeitado</option><option>Entregue</option></select></div>
                     <div class="flex-1 mt-4 md:mt-0"><label for="filter-requester" class="block text-sm font-medium text-gray-700">Filtrar por Solicitante</label><input type="text" id="filter-requester" placeholder="Digite o nome..." class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
@@ -860,6 +868,8 @@
         const productCodePreview = document.getElementById('product-code-preview');
         const productDescriptionPreview = document.getElementById('product-description-preview');
         const printArea = document.getElementById('print-area');
+        const pendingBadge = document.getElementById('pending-badge');
+        const pendingCount = document.getElementById('pending-count');
 
 
         let requisitionsCollection, itemsCollection, employeesCollection, stockLocationsCollection, kanbanEquipmentsCollection;
@@ -961,6 +971,27 @@
                 renderKanbanBoard();
             });
         }
+        
+        const updatePendingBadge = () => {
+            const pendingRequisitions = allRequisitionsDocs.filter(doc => doc.data().status === 'Pendente');
+            const count = pendingRequisitions.length;
+            
+            if (count > 0) {
+                pendingCount.textContent = count;
+                pendingBadge.classList.remove('hidden');
+                
+                // Adicionar estilo clicável apenas para usuários logados
+                if (isLoggedIn) {
+                    pendingBadge.classList.add('cursor-pointer', 'hover:bg-yellow-200');
+                    pendingBadge.title = 'Clique para filtrar requisições pendentes';
+                } else {
+                    pendingBadge.classList.remove('cursor-pointer', 'hover:bg-yellow-200');
+                    pendingBadge.title = '';
+                }
+            } else {
+                pendingBadge.classList.add('hidden');
+            }
+        };
 
         const renderRequisitions = () => {
             console.log('renderRequisitions chamado, total docs:', allRequisitionsDocs.length);
@@ -971,6 +1002,9 @@
             let filteredDocs = allRequisitionsDocs.filter(doc => (statusFilter === 'Todos' || doc.data().status === statusFilter) && (!requesterFilter || doc.data().requester.toLowerCase().includes(requesterFilter)));
             console.log('Docs filtrados:', filteredDocs.length);
             noRequisitionsMessage.classList.toggle('hidden', filteredDocs.length > 0);
+            
+            // Atualizar badge de pendentes
+            updatePendingBadge();
             
             // Paginação
             const totalPages = Math.ceil(filteredDocs.length / requisitionsPerPage);
@@ -2383,6 +2417,15 @@
         filterRequester.addEventListener('input', () => {
             currentRequisitionsPage = 1;
             renderRequisitions();
+        });
+        
+        pendingBadge.addEventListener('click', () => {
+            if (isLoggedIn) {
+                filterStatus.value = 'Pendente';
+                filterRequester.value = '';
+                currentRequisitionsPage = 1;
+                renderRequisitions();
+            }
         });
         
         importExcelBtn.addEventListener('click', handleExcelImport);
