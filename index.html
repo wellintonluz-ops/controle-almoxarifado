@@ -282,7 +282,8 @@
             <p class="text-gray-600 mt-1">Gerencie requisições, cadastros e o estoque de forma integrada.</p>
         </header>
 
-        <div class="absolute top-4 right-4 md:top-8 md:right-8">
+        <div class="absolute top-4 right-4 md:top-8 md:right-8 flex gap-2">
+            <a id="gestao-recebimento-btn" href="https://wellintonluz-ops.github.io/gestao-containers/" target="_blank" class="btn-primary font-semibold py-2 px-4 rounded-md shadow-sm hidden">Gestão de recebimento importação</a>
             <button id="login-logout-btn" class="btn-primary font-semibold py-2 px-4 rounded-md shadow-sm">Login</button>
         </div>
 
@@ -303,31 +304,17 @@
         <!-- Conteúdo da Aba Dashboard -->
         <div id="view-dashboard" class="hidden">
             <div class="bg-white p-6 rounded-lg shadow-md">
-                <h2 class="text-xl font-semibold mb-4">Dashboard de Consumo</h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                    <div>
-                        <label for="dashboard-start-date" class="block text-sm font-medium text-gray-700">Data Início</label>
-                        <input type="date" id="dashboard-start-date" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
-                    </div>
-                    <div>
-                        <label for="dashboard-end-date" class="block text-sm font-medium text-gray-700">Data Fim</label>
-                        <input type="date" id="dashboard-end-date" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
-                    </div>
-                    <div>
-                        <label for="dashboard-product" class="block text-sm font-medium text-gray-700">Produto</label>
-                        <select id="dashboard-product" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
-                            <option value="all">Todos</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label for="dashboard-requester" class="block text-sm font-medium text-gray-700">Solicitante</label>
-                        <select id="dashboard-requester" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md">
-                            <option value="all">Todos</option>
-                        </select>
-                    </div>
+                <h2 class="text-xl font-semibold mb-4">Consumo Mensal por Item</h2>
+                <div class="mb-6 max-w-xs">
+                    <label for="monthly-item-select" class="block text-sm font-medium text-gray-700">Selecione o Item</label>
+                    <select id="monthly-item-select" class="mt-1 block w-full pl-3 pr-10 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                        <option value="">Selecione um item...</option>
+                    </select>
                 </div>
                 <div>
-                    <canvas id="consumption-chart"></canvas>
+                    <div class="w-full max-w-2xl mx-auto">
+                        <canvas id="monthly-consumption-chart" height="260" style="max-width:100%;"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
@@ -355,7 +342,10 @@
                             <span id="pending-count">0</span> pendentes
                         </div>
                     </div>
-                    <div id="loading-requisitions" class="loader"></div>
+                    <div class="flex items-center gap-2">
+                        <button id="export-requisitions-btn" class="btn-primary font-semibold py-2 px-4 rounded-md shadow-sm">Exportar</button>
+                        <div id="loading-requisitions" class="loader"></div>
+                    </div>
                 </div>
                 <div class="flex flex-col md:flex-row md:space-x-4 mb-4">
                     <div class="flex-1"><label for="filter-status" class="block text-sm font-medium text-gray-700">Filtrar por Status</label><select id="filter-status" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"><option>Todos</option><option>Pendente</option><option>Rejeitado</option><option>Entregue</option></select></div>
@@ -877,11 +867,183 @@
         let isFirestoreReady = false;
         let allRequisitionsDocs = [], allItemsDocs = [], allEmployeesDocs = [], allStockLocationsDocs = [], allKanbanEquipmentsDocs = [];
         let consumptionChart = null;
+
         let formListenersAttached = false; // Flag para evitar duplicação de listeners
         let selectedPhotoFile = null; // Armazena o arquivo de foto selecionado
         let shouldRemoveEditPhoto = false; // Flag para indicar remoção de foto na edição
         let currentRequisitionsPage = 1;
         const requisitionsPerPage = 20;
+
+        let monthlyConsumptionChart = null;
+
+        function populateMonthlyItemSelect() {
+            const select = document.getElementById('monthly-item-select');
+            if (!select) return;
+            select.innerHTML = '<option value="">Selecione um item...</option>';
+            allItemsDocs.forEach(doc => {
+                const data = doc.data();
+                select.innerHTML += `<option value="${doc.id}">${data.code ? `[${data.code}] ` : ''}${data.description}</option>`;
+            });
+        }
+
+        function renderMonthlyConsumptionChart() {
+            const select = document.getElementById('monthly-item-select');
+            const canvas = document.getElementById('monthly-consumption-chart');
+            if (!select || !canvas) return;
+            const itemId = select.value;
+            if (!itemId) {
+                if (monthlyConsumptionChart) monthlyConsumptionChart.destroy();
+                return;
+            }
+            // Filtra requisições entregues do item
+            const itemDoc = allItemsDocs.find(doc => doc.id === itemId);
+            if (!itemDoc) return;
+            const itemCode = itemDoc.data().code;
+            // Agrupa por ano e mês
+            const reqs = allRequisitionsDocs.filter(doc => doc.data().status === 'Entregue' && doc.data().itemCode === itemCode && doc.data().statusUpdatedAt);
+            const grouped = {};
+            reqs.forEach(doc => {
+                const d = doc.data();
+                const date = d.statusUpdatedAt.toDate();
+                const year = date.getFullYear();
+                const month = date.getMonth();
+                if (!grouped[year]) grouped[year] = Array(12).fill(0);
+                grouped[year][month] += d.quantity || 0;
+            });
+            // Descobre todos os anos presentes
+            const years = Object.keys(grouped).sort();
+            // Labels dos meses
+            const monthLabels = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+            // Datasets por ano
+            const datasets = years.map((year, idx) => ({
+                label: year,
+                data: grouped[year],
+                backgroundColor: `rgba(${60+idx*60}, ${120+idx*30}, 220, 0.5)`,
+                borderColor: `rgba(${60+idx*60}, ${120+idx*30}, 220, 1)`,
+                borderWidth: 2,
+                type: 'bar',
+            }));
+            // Linha de média do ano atual
+            const currentYear = new Date().getFullYear();
+            if (grouped[currentYear]) {
+                // Média acumulada mês a mês
+                let soma = 0;
+                let count = 0;
+                const avgProgressiva = grouped[currentYear].map((val, idx) => {
+                    if (val > 0) {
+                        soma += val;
+                        count++;
+                    }
+                    return count > 0 ? soma / count : null;
+                });
+                datasets.push({
+                    label: `Média ${currentYear}`,
+                    data: avgProgressiva,
+                    type: 'line',
+                    borderColor: 'rgba(255,99,132,1)',
+                    backgroundColor: 'rgba(255,99,132,0.2)',
+                    borderWidth: 2,
+                    fill: false,
+                    pointRadius: 5,
+                    pointBackgroundColor: 'rgba(255,99,132,1)',
+                    pointBorderColor: 'rgba(255,99,132,1)',
+                    pointHoverRadius: 7,
+                    pointHoverBackgroundColor: 'rgba(255,99,132,0.8)'
+                });
+            }
+            if (monthlyConsumptionChart) monthlyConsumptionChart.destroy();
+            monthlyConsumptionChart = new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels: monthLabels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Consumo Mensal do Item'
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label.startsWith('Média')) {
+                                        return `${label}: ${Number(context.parsed.y).toLocaleString('pt-BR', {maximumFractionDigits:2})} (média mensal)`;
+                                    }
+                                    return `${label}: ${context.parsed.y}`;
+                                }
+                            }
+                        }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Quantidade Consumida'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const select = document.getElementById('monthly-item-select');
+            if (select) {
+                select.addEventListener('change', renderMonthlyConsumptionChart);
+            }
+        });
+
+        // --- EXPORTAÇÃO DE REQUISIÇÕES ---
+        document.addEventListener('DOMContentLoaded', function() {
+            const exportBtn = document.getElementById('export-requisitions-btn');
+            if (exportBtn) {
+                exportBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    // Pega os filtros atuais
+                    const statusFilter = filterStatus.value;
+                    const requesterFilter = filterRequester.value.trim().toLowerCase();
+                    // Filtra todas as requisições
+                    let filteredDocs = allRequisitionsDocs.filter(doc => (statusFilter === 'Todos' || doc.data().status === statusFilter) && (!requesterFilter || doc.data().requester.toLowerCase().includes(requesterFilter)));
+                    if (filteredDocs.length === 0) {
+                        alert('Nenhuma requisição encontrada para exportar.');
+                        return;
+                    }
+                    const headers = ['Data', 'Solicitante', 'Item', 'Qtd.', 'Status', 'Última Atualização'];
+                    const rows = filteredDocs.map(doc => {
+                        const data = doc.data();
+                        return [
+                            data.createdAt?.toDate().toLocaleDateString('pt-BR') || '',
+                            data.requester || '',
+                            (data.itemCode ? `[${data.itemCode}] - ` : '') + (data.itemDescription || data.item || ''),
+                            data.quantity || '',
+                            data.status || '',
+                            data.statusUpdatedAt ? data.statusUpdatedAt.toDate().toLocaleString('pt-BR') : ''
+                        ];
+                    });
+                    const csv = [headers, ...rows].map(r => r.map(v => '"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
+                    const blob = new Blob([csv], { type: 'text/csv' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'requisicoes.csv';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                });
+            }
+        });
 
 
         // Verifica se o usuário já estava logado na sessão
@@ -889,17 +1051,6 @@
             isLoggedIn = true;
         }
         
-        // Inicializar datas padrão do dashboard (últimos 30 dias)
-        function initializeDashboardDates() {
-            const today = new Date();
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(today.getDate() - 30);
-            
-            dashboardEndDate.value = today.toISOString().split('T')[0];
-            dashboardStartDate.value = thirtyDaysAgo.toISOString().split('T')[0];
-        }
-        
-        initializeDashboardDates();
 
         async function setupAuthAndFirestore() {
             try {
@@ -932,29 +1083,30 @@
         }
         
         function listenToAllCollections() {
-            loadingRequisitions.classList.remove('hidden'); 
-            onSnapshot(query(requisitionsCollection), s => { 
-                allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0)); 
-                renderRequisitions(); 
-                renderDashboard();
-                loadingRequisitions.classList.add('hidden'); 
-            }); 
-            
-            loadingEmployees.classList.remove('hidden'); 
-            onSnapshot(query(employeesCollection), s => { 
-                allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name)); 
-                renderEmployees(); 
+            loadingRequisitions.classList.remove('hidden');
+            onSnapshot(query(requisitionsCollection), s => {
+                allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
+                renderRequisitions();
+                renderMonthlyConsumptionChart();
+                loadingRequisitions.classList.add('hidden');
+            });
+
+            loadingEmployees.classList.remove('hidden');
+            onSnapshot(query(employeesCollection), s => {
+                allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name));
+                renderEmployees();
                 populateSelects();
-                loadingEmployees.classList.add('hidden'); 
-            }); 
-            
+                loadingEmployees.classList.add('hidden');
+            });
+
             loadingItems.classList.remove('hidden');
-            onSnapshot(query(itemsCollection), s => { 
-                allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description)); 
-                renderItems(); 
-                renderStock(); 
+            onSnapshot(query(itemsCollection), s => {
+                allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description));
+                renderItems();
+                renderStock();
                 populateSelects();
-                loadingItems.classList.add('hidden'); 
+                populateMonthlyItemSelect();
+                loadingItems.classList.add('hidden');
             });
             
             loadingStock.classList.remove('hidden');
@@ -1219,36 +1371,23 @@
             transferItemSelect.value = currentTransferVal;
 
             const currentReq = requesterSelect.value;
-            const currentDashReq = dashboardRequesterSelect.value;
-            const currentDashProduct = dashboardProductSelect.value;
             const currentUserSelect = userSelect.value;
-            
+
             requesterSelect.innerHTML = '<option value="">Selecione um funcionário...</option>';
-            dashboardRequesterSelect.innerHTML = '<option value="all">Todos</option>';
-            dashboardProductSelect.innerHTML = '<option value="all">Todos</option>';
             userSelect.innerHTML = '<option value="" disabled selected>Selecione um funcionário...</option>';
-            
+
             allEmployeesDocs.forEach(doc => {
                 const data = doc.data();
                 requesterSelect.innerHTML += `<option value="${data.name}" data-department="${data.department}">${data.name}</option>`;
-                dashboardRequesterSelect.innerHTML += `<option value="${data.name}">${data.name}</option>`;
                 userSelect.innerHTML += `<option value="${doc.id}">${data.name} (${data.department})</option>`;
             });
-            
-            // Popular produtos no dashboard
-            allItemsDocs.forEach(doc => {
-                const data = doc.data();
-                if (data.active === false) return;
-                dashboardProductSelect.innerHTML += `<option value="${data.code}">[${data.code}] ${data.description}</option>`;
-            });
-            
+
             requesterSelect.value = currentReq;
-            dashboardRequesterSelect.value = currentDashReq;
-            dashboardProductSelect.value = currentDashProduct;
             userSelect.value = currentUserSelect;
         };
         
         function updateUIForAuth() {
+            const gestaoRecebimentoBtn = document.getElementById('gestao-recebimento-btn');
             const isReady = isFirestoreReady;
             const isAdmin = isLoggedIn;
 
@@ -1278,14 +1417,20 @@
             if (importExcelBtn) importExcelBtn.disabled = !isAdminReady;
             if (generateBtn) generateBtn.disabled = !isReady; // Corrected this line
             if (printBtn) printBtn.disabled = true; // Always start disabled
-            if (batchFileUpload) batchFileUpload.disabled = !isReady; // Corrected this line
+            if (batchFileUpload) batchFileUpload.disabled = !isAdminReady; // Corrected this line
 
+            if (gestaoRecebimentoBtn) {
+                if (isAdmin) {
+                    gestaoRecebimentoBtn.classList.remove('hidden');
+                } else {
+                    gestaoRecebimentoBtn.classList.add('hidden');
+                }
+            }
 
             renderRequisitions();
             renderItems();
             renderEmployees();
             renderStock();
-            renderDashboard();
             renderKanbanBoard();
         }
 
@@ -1788,97 +1933,6 @@
             }
         }
         
-        function renderDashboard() {
-            if (!isFirestoreReady) return;
-
-            const startDateValue = dashboardStartDate.value;
-            const endDateValue = dashboardEndDate.value;
-            const product = dashboardProductSelect.value;
-            const requester = dashboardRequesterSelect.value;
-
-            if (!startDateValue || !endDateValue) return;
-
-            const startDate = new Date(startDateValue);
-            startDate.setHours(0, 0, 0, 0);
-            
-            const endDate = new Date(endDateValue);
-            endDate.setHours(23, 59, 59, 999);
-
-            let filteredReqs = allRequisitionsDocs.filter(doc => {
-                const data = doc.data();
-                const reqDate = data.statusUpdatedAt?.toDate();
-                return data.status === 'Entregue' && reqDate && reqDate >= startDate && reqDate <= endDate;
-            });
-
-            if (requester !== 'all') {
-                filteredReqs = filteredReqs.filter(doc => doc.data().requester === requester);
-            }
-            
-            if (product !== 'all') {
-                filteredReqs = filteredReqs.filter(doc => doc.data().itemCode === product);
-            }
-
-            const consumptionData = filteredReqs.reduce((acc, doc) => {
-                const { itemDescription, quantity } = doc.data();
-                acc[itemDescription] = (acc[itemDescription] || 0) + quantity;
-                return acc;
-            }, {});
-
-            const labels = Object.keys(consumptionData);
-            const data = Object.values(consumptionData);
-            
-            const totalConsumed = data.reduce((sum, val) => sum + val, 0);
-            const averageConsumption = labels.length > 0 ? totalConsumed / labels.length : 0;
-
-
-            if (consumptionChart) {
-                consumptionChart.destroy();
-            }
-
-            consumptionChart = new Chart(consumptionChartCanvas, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [
-                        {
-                            type: 'bar',
-                            label: 'Consumo',
-                            data: data,
-                            backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                            borderColor: 'rgba(54, 162, 235, 1)',
-                            borderWidth: 1
-                        },
-                        {
-                            type: 'line',
-                            label: 'Média de Consumo',
-                            data: Array(labels.length).fill(averageConsumption.toFixed(2)),
-                            borderColor: 'rgba(255, 99, 132, 1)',
-                            borderWidth: 2,
-                            fill: false,
-                            pointRadius: 0
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Quantidade Consumida'
-                            }
-                        }
-                    },
-                    plugins: {
-                        title: {
-                            display: true,
-                            text: 'Consumo de Itens'
-                        }
-                    }
-                }
-            });
-        }
         
         // --- KANBAN LOGIC ---
         
@@ -1938,14 +1992,14 @@
             }
 
             card.innerHTML = `
-                <div class="flex justify-between items-start">
+                <div class="flex justify-between items-start mb-2">
                     <h3 class="font-semibold">${escapeHTML(equip.name)}</h3>
                     <div class="flex gap-2">
                         <button class="kanban-edit-btn text-gray-400 hover:text-indigo-600" data-id="${equip.id}">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 pointer-events-none" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg>
                         </button>
                         <button class="kanban-delete-btn text-gray-400 hover:text-red-600" data-id="${equip.id}">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 pointer-events-none" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 pointer-events-none" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 112 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 112 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg>
                         </button>
                     </div>
                 </div>
@@ -2472,10 +2526,6 @@
             shouldRemoveEditPhoto = true; // Marcar que deve remover a foto ao salvar
         });
         
-        dashboardStartDate.addEventListener('change', renderDashboard);
-        dashboardEndDate.addEventListener('change', renderDashboard);
-        dashboardProductSelect.addEventListener('change', renderDashboard);
-        dashboardRequesterSelect.addEventListener('change', renderDashboard);
         stockItemSearchInput.addEventListener('change', handleBarcodeSearch);
         
         // Event listener para clicar no código do item na requisição
@@ -2694,7 +2744,7 @@
                 }
                 
                 catalogGrid.appendChild(card);
-            });
+                       });
         }
         
         // Event listener para fechar modal de imagem
