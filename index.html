@@ -303,18 +303,65 @@
         
         <!-- Conteúdo da Aba Dashboard -->
         <div id="view-dashboard" class="hidden">
-            <div class="bg-white p-6 rounded-lg shadow-md">
-                <h2 class="text-xl font-semibold mb-4">Consumo Mensal por Item</h2>
-                <div class="mb-6 max-w-xs">
-                    <label for="monthly-item-select" class="block text-sm font-medium text-gray-700">Selecione o Item</label>
-                    <select id="monthly-item-select" class="mt-1 block w-full pl-3 pr-10 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
-                        <option value="">Selecione um item...</option>
-                    </select>
-                </div>
-                <div>
-                    <div class="w-full max-w-2xl mx-auto">
-                        <canvas id="monthly-consumption-chart" height="260" style="max-width:100%;"></canvas>
+            <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-lg font-semibold">Tempo médio de atendimento</h3>
+                        <p class="text-sm text-gray-500">Média das últimas 100 requisições (criação → última atualização).</p>
                     </div>
+                    <div class="text-right">
+                        <p id="avg-req-time" class="text-3xl font-bold text-gray-900">--</p>
+                        <p id="avg-req-time-detail" class="text-xs text-gray-500">--</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold mb-4">Consumo Mensal por Item</h2>
+                    <div class="mb-6 max-w-xs">
+                        <label for="monthly-item-select" class="block text-sm font-medium text-gray-700">Selecione o Item</label>
+                        <input id="monthly-item-search" type="text" placeholder="Digite para buscar..." class="mt-1 mb-2 block w-full pl-3 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" autocomplete="off">
+                        <select id="monthly-item-select" class="mt-1 block w-full pl-3 pr-10 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                            <option value="">Selecione um item...</option>
+                        </select>
+                    </div>
+                    <div>
+                        <div class="w-full max-w-2xl mx-auto">
+                            <canvas id="monthly-consumption-chart" height="260" style="max-width:100%;"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-lg shadow-md">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h2 class="text-xl font-semibold">Requisições por Mês</h2>
+                            <p class="text-sm text-gray-500">Clique em um mês para ver o detalhamento diário.</p>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <label for="monthly-year-select" class="text-sm text-gray-600">Ano</label>
+                            <select id="monthly-year-select" class="border border-gray-300 rounded-md text-sm px-2 py-1 focus:outline-none focus:ring-blue-500 focus:border-blue-500"></select>
+                            <span class="text-xs px-2 py-1 bg-blue-50 text-blue-700 rounded">Base: última atualização</span>
+                        </div>
+                    </div>
+                    <div class="w-full max-w-2xl mx-auto">
+                        <canvas id="monthly-requests-chart" height="260" style="max-width:100%;"></canvas>
+                        <p id="monthly-requests-empty" class="text-center text-gray-500 text-sm mt-4 hidden">Ainda não há requisições para exibir.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow-md mt-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 class="text-lg font-semibold">Requisições por Dia (mês selecionado)</h3>
+                        <p id="daily-requests-title" class="text-sm text-gray-500">Selecione um mês no gráfico acima.</p>
+                    </div>
+                </div>
+                <div class="w-full max-w-4xl mx-auto">
+                    <canvas id="daily-requests-chart" height="240" style="max-width:100%;"></canvas>
+                    <p id="daily-requests-empty" class="text-center text-gray-500 text-sm mt-4">Clique em um mês para detalhar os dias.</p>
                 </div>
             </div>
         </div>
@@ -831,6 +878,15 @@
         const consumptionChartCanvas = document.getElementById('consumption-chart');
         const itemSearchInput = document.getElementById('item-search-input');
         const itemSearchDropdown = document.getElementById('item-search-dropdown');
+        const monthlyRequestsChartCanvas = document.getElementById('monthly-requests-chart');
+        const dailyRequestsChartCanvas = document.getElementById('daily-requests-chart');
+        const monthlyRequestsEmpty = document.getElementById('monthly-requests-empty');
+        const dailyRequestsEmpty = document.getElementById('daily-requests-empty');
+        const dailyRequestsTitle = document.getElementById('daily-requests-title');
+        const monthlyYearSelect = document.getElementById('monthly-year-select');
+        const monthlyItemSearchInput = document.getElementById('monthly-item-search');
+        const avgReqTimeEl = document.getElementById('avg-req-time');
+        const avgReqTimeDetailEl = document.getElementById('avg-req-time-detail');
 
         // Kanban Elements
         const kanbanBoard = document.getElementById('kanban-board');
@@ -875,15 +931,271 @@
         const requisitionsPerPage = 20;
 
         let monthlyConsumptionChart = null;
+        const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+        let monthlyRequestsChart = null;
+        let dailyRequestsChart = null;
+        let monthlyRequestsData = [];
+        let monthlyRequestsYears = [];
+        let selectedMonthlyYear = new Date().getFullYear();
+        let monthlyItemSearchTerm = '';
+
+        function getRequestBaseDate(data) {
+            const updated = data.statusUpdatedAt?.toDate();
+            const created = data.createdAt?.toDate();
+            return updated || created || null;
+        }
+
+        function formatDuration(ms) {
+            const totalMinutes = Math.round(ms / 60000);
+            const hours = Math.floor(totalMinutes / 60);
+            const minutes = totalMinutes % 60;
+            if (hours > 0) {
+                return `${hours}h ${minutes}m`;
+            }
+            return `${minutes}m`;
+        }
+
+        function updateAverageRequestTime() {
+            if (!avgReqTimeEl || !avgReqTimeDetailEl) return;
+
+            const recentDocs = allRequisitionsDocs.slice(0, 100);
+            let totalMs = 0;
+            let count = 0;
+
+            recentDocs.forEach(doc => {
+                const data = doc.data();
+                const created = data.createdAt?.toDate();
+                const updated = data.statusUpdatedAt?.toDate();
+                if (!created || !updated) return;
+                const diff = updated - created;
+                if (diff >= 0) {
+                    totalMs += diff;
+                    count += 1;
+                }
+            });
+
+            if (count === 0) {
+                avgReqTimeEl.textContent = '--';
+                avgReqTimeDetailEl.textContent = 'Sem dados suficientes';
+                return;
+            }
+
+            const avgMs = totalMs / count;
+            avgReqTimeEl.textContent = formatDuration(avgMs);
+            const hours = (avgMs / 3600000).toFixed(2);
+            avgReqTimeDetailEl.textContent = `Baseado em ${count} requisições | ${hours} h méd.`;
+        }
+
+        function buildMonthlyRequestsData() {
+            const buckets = {};
+            const years = new Set();
+
+            allRequisitionsDocs.forEach(doc => {
+                const data = doc.data();
+                const baseDate = getRequestBaseDate(data);
+                if (!baseDate) return;
+
+                const year = baseDate.getFullYear();
+                const month = baseDate.getMonth();
+                const day = baseDate.getDate();
+                years.add(year);
+
+                if (selectedMonthlyYear && year !== selectedMonthlyYear) return;
+
+                const key = `${year}-${month}`;
+
+                if (!buckets[key]) {
+                    buckets[key] = {
+                        year,
+                        month,
+                        total: 0,
+                        dailyCounts: {}
+                    };
+                }
+
+                buckets[key].total += 1;
+                buckets[key].dailyCounts[day] = (buckets[key].dailyCounts[day] || 0) + 1;
+            });
+
+            monthlyRequestsYears = Array.from(years).sort((a, b) => a - b);
+            monthlyRequestsData = Object.values(buckets).sort((a, b) => {
+                if (a.year !== b.year) return a.year - b.year;
+                return a.month - b.month;
+            });
+        }
+
+        function renderDailyRequests(monthData) {
+            if (!dailyRequestsChartCanvas) return;
+
+            if (dailyRequestsChart) {
+                dailyRequestsChart.destroy();
+                dailyRequestsChart = null;
+            }
+
+            if (!monthData) {
+                dailyRequestsEmpty.classList.remove('hidden');
+                dailyRequestsTitle.textContent = 'Selecione um mês no gráfico acima.';
+                return;
+            }
+
+            const days = Object.keys(monthData.dailyCounts).sort((a, b) => Number(a) - Number(b));
+            if (days.length === 0) {
+                dailyRequestsEmpty.classList.remove('hidden');
+                dailyRequestsTitle.textContent = 'Sem requisições para o mês selecionado.';
+                return;
+            }
+
+            dailyRequestsEmpty.classList.add('hidden');
+            dailyRequestsTitle.textContent = `Requisições de ${monthNames[monthData.month]} ${monthData.year}`;
+
+            const data = days.map(day => monthData.dailyCounts[day]);
+
+            dailyRequestsChart = new Chart(dailyRequestsChartCanvas, {
+                type: 'bar',
+                data: {
+                    labels: days,
+                    datasets: [
+                        {
+                            label: 'Requisições por dia',
+                            data,
+                            backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                            borderColor: 'rgba(59, 130, 246, 1)',
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => `${ctx.parsed.y} requisição(ões)`
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Quantidade' }
+                        },
+                        x: {
+                            title: { display: true, text: 'Dia do mês' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderMonthlyRequests() {
+            if (!monthlyRequestsChartCanvas) return;
+
+            buildMonthlyRequestsData();
+
+            // Garantir seleção de ano válida
+            if (monthlyRequestsYears.length > 0 && !monthlyRequestsYears.includes(selectedMonthlyYear)) {
+                const currentYear = new Date().getFullYear();
+                selectedMonthlyYear = monthlyRequestsYears.includes(currentYear)
+                    ? currentYear
+                    : monthlyRequestsYears[monthlyRequestsYears.length - 1];
+                buildMonthlyRequestsData();
+            }
+
+            // Atualiza opções do seletor de ano
+            if (monthlyYearSelect) {
+                monthlyYearSelect.innerHTML = '';
+                monthlyRequestsYears.forEach(y => {
+                    const opt = document.createElement('option');
+                    opt.value = y;
+                    opt.textContent = y;
+                    monthlyYearSelect.appendChild(opt);
+                });
+                monthlyYearSelect.value = selectedMonthlyYear || '';
+            }
+
+            if (monthlyRequestsChart) {
+                monthlyRequestsChart.destroy();
+                monthlyRequestsChart = null;
+            }
+
+            if (monthlyRequestsData.length === 0) {
+                monthlyRequestsEmpty.classList.remove('hidden');
+                dailyRequestsEmpty.classList.remove('hidden');
+                dailyRequestsTitle.textContent = 'Selecione um mês no gráfico acima.';
+                renderDailyRequests(null);
+                return;
+            }
+
+            monthlyRequestsEmpty.classList.add('hidden');
+
+            const labels = monthlyRequestsData.map(m => `${monthNames[m.month]}/${m.year}`);
+            const data = monthlyRequestsData.map(m => m.total);
+
+            monthlyRequestsChart = new Chart(monthlyRequestsChartCanvas, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Requisições no mês',
+                            data,
+                            backgroundColor: 'rgba(16, 185, 129, 0.45)',
+                            borderColor: 'rgba(16, 185, 129, 1)',
+                            borderWidth: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    onClick: (_, elements) => {
+                        if (!elements.length) return;
+                        const index = elements[0].index;
+                        const monthData = monthlyRequestsData[index];
+                        renderDailyRequests(monthData);
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: ctx => `${ctx.parsed.y} requisição(ões)`
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Quantidade' }
+                        }
+                    }
+                }
+            });
+
+            // Pré-carrega o mês mais recente para o gráfico diário
+            renderDailyRequests(monthlyRequestsData[monthlyRequestsData.length - 1]);
+        }
 
         function populateMonthlyItemSelect() {
             const select = document.getElementById('monthly-item-select');
             if (!select) return;
+
+            const term = (monthlyItemSearchTerm || '').toLowerCase();
+            const current = select.value;
             select.innerHTML = '<option value="">Selecione um item...</option>';
-            allItemsDocs.forEach(doc => {
+
+            const filtered = allItemsDocs.filter(doc => {
+                const data = doc.data();
+                const code = (data.code || '').toLowerCase();
+                const desc = (data.description || '').toLowerCase();
+                return !term || code.includes(term) || desc.includes(term);
+            });
+
+            filtered.forEach(doc => {
                 const data = doc.data();
                 select.innerHTML += `<option value="${doc.id}">${data.code ? `[${data.code}] ` : ''}${data.description}</option>`;
             });
+
+            // Restaura seleção se ainda existir
+            if (current && filtered.some(doc => doc.id === current)) {
+                select.value = current;
+            }
         }
 
         function renderMonthlyConsumptionChart() {
@@ -1002,6 +1314,13 @@
             if (select) {
                 select.addEventListener('change', renderMonthlyConsumptionChart);
             }
+            if (monthlyItemSearchInput) {
+                monthlyItemSearchInput.addEventListener('input', () => {
+                    monthlyItemSearchTerm = monthlyItemSearchInput.value.trim();
+                    populateMonthlyItemSelect();
+                    renderMonthlyConsumptionChart();
+                });
+            }
         });
 
         // --- EXPORTAÇÃO DE REQUISIÇÕES ---
@@ -1088,6 +1407,8 @@
                 allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
                 renderRequisitions();
                 renderMonthlyConsumptionChart();
+                renderMonthlyRequests();
+                updateAverageRequestTime();
                 loadingRequisitions.classList.add('hidden');
             });
 
@@ -2197,6 +2518,13 @@
         allTabs.forEach((tab, index) => {
             tab.addEventListener('click', () => handleTabClick(tab, allViews[index], allTabs.filter(t => t !== tab), allViews.filter(v => v !== allViews[index])));
         });
+
+        if (monthlyYearSelect) {
+            monthlyYearSelect.addEventListener('change', () => {
+                selectedMonthlyYear = Number(monthlyYearSelect.value) || new Date().getFullYear();
+                renderMonthlyRequests();
+            });
+        }
         
         cancelLoginBtn.addEventListener('click', () => loginModal.classList.add('hidden'));
         cancelUpdateBtn.addEventListener('click', () => statusModal.classList.add('hidden'));
