@@ -495,6 +495,35 @@
                             </div>
                         </form>
                      </div>
+
+                     <!-- Baixa de Estoque -->
+                     <div class="bg-white p-6 rounded-lg shadow-md mt-8">
+                        <h2 class="text-xl font-semibold mb-4">Baixa de Estoque</h2>
+                        <form id="stock-out-form">
+                            <div class="mb-4">
+                                <label for="stock-out-item-select" class="block text-sm font-medium text-gray-700">Item</label>
+                                <select id="stock-out-item-select" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                                    <option value="">Selecione um item...</option>
+                                </select>
+                            </div>
+                            <div class="mb-4">
+                                <label for="stock-out-address" class="block text-sm font-medium text-gray-700">Endereço</label>
+                                <select id="stock-out-address" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                                    <option value="">Selecione o endereço...</option>
+                                </select>
+                                <p id="stock-out-available" class="text-xs text-gray-500 mt-1"></p>
+                            </div>
+                            <div class="mb-4">
+                                <label for="stock-out-quantity" class="block text-sm font-medium text-gray-700">Quantidade a Dar Baixa</label>
+                                <input type="number" id="stock-out-quantity" min="1" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                            </div>
+                            <div class="text-right">
+                                <button type="submit" id="submit-stock-out-btn" class="w-full btn-danger font-semibold py-2 px-6 rounded-md shadow-sm" disabled>
+                                    Registrar Baixa
+                                </button>
+                            </div>
+                        </form>
+                     </div>
                 </div>
             </div>
         </div>
@@ -825,7 +854,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
         // ************************************************************************************
@@ -865,6 +894,7 @@
         const loginModal = document.getElementById('login-modal'), loginForm = document.getElementById('login-form'), cancelLoginBtn = document.getElementById('cancel-login'), loginError = document.getElementById('login-error');
         const loadingStock = document.getElementById('loading-stock'), stockListBody = document.getElementById('stock-list'), noStockItems = document.getElementById('no-stock-items'), stockEntryForm = document.getElementById('stock-entry-form'), stockItemSelect = document.getElementById('stock-item-select'), submitStockEntryBtn = document.getElementById('submit-stock-entry-btn'), stockItemSearchInput = document.getElementById('stock-item-search');
         const stockTransferForm = document.getElementById('stock-transfer-form'), transferItemSelect = document.getElementById('transfer-item-select'), transferFromAddress = document.getElementById('transfer-from-address'), transferToAddress = document.getElementById('transfer-to-address'), transferQuantity = document.getElementById('transfer-quantity'), submitTransferBtn = document.getElementById('submit-transfer-btn'), originQuantity = document.getElementById('origin-quantity');
+        const stockOutForm = document.getElementById('stock-out-form'), stockOutItemSelect = document.getElementById('stock-out-item-select'), stockOutAddress = document.getElementById('stock-out-address'), stockOutQuantity = document.getElementById('stock-out-quantity'), submitStockOutBtn = document.getElementById('submit-stock-out-btn'), stockOutAvailable = document.getElementById('stock-out-available');
         const locationSelectModal = document.getElementById('location-select-modal'), locationsList = document.getElementById('locations-list'), locationSelectError = document.getElementById('location-select-error'), confirmLocationSelectionBtn = document.getElementById('confirm-location-selection'), cancelLocationSelectionBtn = document.getElementById('cancel-location-selection'), modalLocationReqId = document.getElementById('modal-location-req-id');
         const editItemModal = document.getElementById('edit-item-modal'), editItemForm = document.getElementById('edit-item-form'), cancelEditItemBtn = document.getElementById('cancel-edit-item');
         const dashboardStartDate = document.getElementById('dashboard-start-date');
@@ -919,6 +949,7 @@
 
 
         let requisitionsCollection, itemsCollection, employeesCollection, stockLocationsCollection, kanbanEquipmentsCollection;
+        let unsubRequisitions = null, unsubItems = null, unsubEmployees = null, unsubStock = null, unsubKanban = null;
         let isLoggedIn = false;
         let isFirestoreReady = false;
         let allRequisitionsDocs = [], allItemsDocs = [], allEmployeesDocs = [], allStockLocationsDocs = [], allKanbanEquipmentsDocs = [];
@@ -1384,8 +1415,11 @@
                 
                 isFirestoreReady = true;
 
-                listenToAllCollections();
-                updateUIForAuth(); 
+                await fetchInitialData();
+                updateUIForAuth();
+                if (isLoggedIn) {
+                    startRealtimeListeners();
+                }
             } catch (error) {
                 console.error("Erro na autenticação ou Firestore:", error);
                 isFirestoreReady = false;
@@ -1400,48 +1434,106 @@
             clearTimeout(renderTimeout);
             renderTimeout = setTimeout(fn, delay);
         }
-        
-        function listenToAllCollections() {
-            loadingRequisitions.classList.remove('hidden');
-            onSnapshot(query(requisitionsCollection), s => {
-                allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
+
+        async function fetchInitialData() {
+            if (!isFirestoreReady) return;
+            try {
+                loadingRequisitions.classList.remove('hidden');
+                loadingEmployees.classList.remove('hidden');
+                loadingItems.classList.remove('hidden');
+                loadingStock.classList.remove('hidden');
+
+                const [reqSnap, empSnap, itemSnap, stockSnap, kanbanSnap] = await Promise.all([
+                    getDocs(query(requisitionsCollection, orderBy('createdAt', 'desc'))),
+                    getDocs(employeesCollection),
+                    getDocs(itemsCollection),
+                    getDocs(stockLocationsCollection),
+                    getDocs(kanbanEquipmentsCollection)
+                ]);
+
+                allRequisitionsDocs = reqSnap.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
+                allEmployeesDocs = empSnap.docs.sort((a, b) => a.data().name.localeCompare(b.data().name));
+                allItemsDocs = itemSnap.docs.sort((a, b) => a.data().description.localeCompare(b.data().description));
+                allStockLocationsDocs = stockSnap.docs.sort((a, b) => a.data().address.localeCompare(b.data().address));
+                allKanbanEquipmentsDocs = kanbanSnap.docs;
+
                 renderRequisitions();
                 renderMonthlyConsumptionChart();
                 renderMonthlyRequests();
                 updateAverageRequestTime();
-                loadingRequisitions.classList.add('hidden');
-            });
-
-            loadingEmployees.classList.remove('hidden');
-            onSnapshot(query(employeesCollection), s => {
-                allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name));
                 renderEmployees();
-                populateSelects();
-                loadingEmployees.classList.add('hidden');
-            });
-
-            loadingItems.classList.remove('hidden');
-            onSnapshot(query(itemsCollection), s => {
-                allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description));
                 renderItems();
                 renderStock();
                 populateSelects();
                 populateMonthlyItemSelect();
-                loadingItems.classList.add('hidden');
-            });
-            
-            loadingStock.classList.remove('hidden');
-            onSnapshot(query(stockLocationsCollection), s => { 
-                allStockLocationsDocs = s.docs.sort((a,b) => a.data().address.localeCompare(b.data().address)); 
-                renderStock(); 
-                renderItems();
-                loadingStock.classList.add('hidden'); 
-            });
-        
-            onSnapshot(query(kanbanEquipmentsCollection), s => { 
-                allKanbanEquipmentsDocs = s.docs; 
                 renderKanbanBoard();
+            } catch (error) {
+                console.error('Erro ao carregar dados iniciais:', error);
+            } finally {
+                [loadingRequisitions, loadingEmployees, loadingItems, loadingStock].forEach(l => l.classList.add('hidden'));
+            }
+        }
+
+        function startRealtimeListeners() {
+            if (!isFirestoreReady) return;
+
+            if (!unsubRequisitions) {
+                loadingRequisitions.classList.remove('hidden');
+                unsubRequisitions = onSnapshot(query(requisitionsCollection, orderBy('createdAt', 'desc')), s => {
+                    allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
+                    renderRequisitions();
+                    renderMonthlyConsumptionChart();
+                    renderMonthlyRequests();
+                    updateAverageRequestTime();
+                    loadingRequisitions.classList.add('hidden');
+                });
+            }
+
+            if (!unsubEmployees) {
+                loadingEmployees.classList.remove('hidden');
+                unsubEmployees = onSnapshot(employeesCollection, s => {
+                    allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name));
+                    renderEmployees();
+                    populateSelects();
+                    loadingEmployees.classList.add('hidden');
+                });
+            }
+
+            if (!unsubItems) {
+                loadingItems.classList.remove('hidden');
+                unsubItems = onSnapshot(itemsCollection, s => {
+                    allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description));
+                    renderItems();
+                    renderStock();
+                    populateSelects();
+                    populateMonthlyItemSelect();
+                    loadingItems.classList.add('hidden');
+                });
+            }
+
+            if (!unsubStock) {
+                loadingStock.classList.remove('hidden');
+                unsubStock = onSnapshot(stockLocationsCollection, s => {
+                    allStockLocationsDocs = s.docs.sort((a, b) => a.data().address.localeCompare(b.data().address));
+                    renderStock();
+                    renderItems();
+                    loadingStock.classList.add('hidden');
+                });
+            }
+
+            if (!unsubKanban) {
+                unsubKanban = onSnapshot(kanbanEquipmentsCollection, s => {
+                    allKanbanEquipmentsDocs = s.docs;
+                    renderKanbanBoard();
+                });
+            }
+        }
+
+        function unsubscribeAll() {
+            [unsubRequisitions, unsubEmployees, unsubItems, unsubStock, unsubKanban].forEach((fn, idx) => {
+                if (fn) fn();
             });
+            unsubRequisitions = unsubEmployees = unsubItems = unsubStock = unsubKanban = null;
         }
         
         const updatePendingBadge = () => {
@@ -1676,9 +1768,11 @@
             // Popular apenas o select de estoque (o item-select agora é hidden e usa pesquisa)
             const currentStockVal = stockItemSelect.value;
             const currentTransferVal = transferItemSelect.value;
+            const currentStockOutVal = stockOutItemSelect.value;
             
             stockItemSelect.innerHTML = `<option value="">Selecione um item...</option>`;
             transferItemSelect.innerHTML = `<option value="">Selecione um item...</option>`;
+            stockOutItemSelect.innerHTML = `<option value="">Selecione um item...</option>`;
             
             allItemsDocs.forEach(doc => {
                 const data = doc.data();
@@ -1687,9 +1781,11 @@
                 const optionValue = JSON.stringify({ id: doc.id, code: data.code, description: data.description });
                 stockItemSelect.innerHTML += `<option value='${optionValue}'>${data.description}</option>`;
                 transferItemSelect.innerHTML += `<option value='${optionValue}'>${data.description}</option>`;
+                stockOutItemSelect.innerHTML += `<option value='${optionValue}'>${data.description}</option>`;
             });
             stockItemSelect.value = currentStockVal;
             transferItemSelect.value = currentTransferVal;
+            stockOutItemSelect.value = currentStockOutVal;
 
             const currentReq = requesterSelect.value;
             const currentUserSelect = userSelect.value;
@@ -1733,6 +1829,7 @@
             
             if (submitStockEntryBtn) submitStockEntryBtn.disabled = !isAdminReady;
             if (submitTransferBtn) submitTransferBtn.disabled = !isAdminReady;
+            if (submitStockOutBtn) submitStockOutBtn.disabled = !isAdminReady;
             if (submitItemBtn) submitItemBtn.disabled = !isAdminReady;
             if (submitEmployeeBtn) submitEmployeeBtn.disabled = !isAdminReady;
             if (importExcelBtn) importExcelBtn.disabled = !isAdminReady;
@@ -1939,6 +2036,44 @@
                     alert("Falha ao transferir estoque: " + error.message);
                 }
             });
+
+            stockOutForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                if (!isLoggedIn) return;
+
+                if (!stockOutItemSelect.value || !stockOutAddress.value) {
+                    alert('Selecione item e endereço para dar baixa.');
+                    return;
+                }
+
+                const locationId = stockOutAddress.value;
+                const quantityToOut = Number(stockOutQuantity.value);
+
+                const locDoc = allStockLocationsDocs.find(doc => doc.id === locationId);
+                if (!locDoc) {
+                    alert('Endereço não encontrado.');
+                    return;
+                }
+
+                const currentQty = locDoc.data().quantity || 0;
+                if (quantityToOut > currentQty) {
+                    alert(`Quantidade insuficiente. Disponível: ${currentQty}`);
+                    return;
+                }
+
+                try {
+                    const newQty = currentQty - quantityToOut;
+                    await updateDoc(doc(stockLocationsCollection, locationId), { quantity: newQty });
+                    alert('Baixa registrada com sucesso.');
+                    stockOutForm.reset();
+                    stockOutAddress.innerHTML = '<option value="">Selecione o endereço...</option>';
+                    stockOutAvailable.textContent = '';
+                    stockOutQuantity.max = '';
+                } catch (error) {
+                    console.error('Erro ao registrar baixa:', error);
+                    alert('Falha ao registrar baixa: ' + error.message);
+                }
+            });
         }
 
         async function handleExcelImport() {
@@ -2027,6 +2162,7 @@
                 sessionStorage.setItem('isUserLoggedIn', 'true'); // Salva o estado de login
                 loginForm.reset();
                 loginModal.classList.add('hidden');
+                startRealtimeListeners();
                 updateUIForAuth();
             } else {
                 loginError.classList.remove('hidden');
@@ -2492,6 +2628,7 @@
 
         loginLogoutBtn.addEventListener('click', () => {
             if (isLoggedIn) {
+                unsubscribeAll();
                 isLoggedIn = false;
                 sessionStorage.removeItem('isUserLoggedIn'); // Remove o estado de login
                 updateUIForAuth();
@@ -2909,6 +3046,49 @@
                 const qty = fromLocation.data().quantity || 0;
                 originQuantity.textContent = `Quantidade disponível: ${qty}`;
                 transferQuantity.max = qty;
+            }
+        });
+
+        // Baixa: popular endereços disponíveis do item
+        stockOutItemSelect.addEventListener('change', () => {
+            stockOutAddress.innerHTML = '<option value="">Selecione o endereço...</option>';
+            stockOutAvailable.textContent = '';
+            stockOutQuantity.value = '';
+            stockOutQuantity.max = '';
+
+            if (!stockOutItemSelect.value) return;
+
+            try {
+                const itemData = JSON.parse(stockOutItemSelect.value);
+                const locations = allStockLocationsDocs.filter(doc => doc.data().itemCode === itemData.code && doc.data().quantity > 0);
+
+                if (locations.length === 0) {
+                    stockOutAddress.innerHTML = '<option value="">Sem estoque disponível</option>';
+                    return;
+                }
+
+                locations.forEach(locDoc => {
+                    const locData = locDoc.data();
+                    stockOutAddress.innerHTML += `<option value="${locDoc.id}">${locData.address} (Qtd: ${locData.quantity})</option>`;
+                });
+            } catch (e) {
+                console.error('Erro ao carregar endereços para baixa:', e);
+            }
+        });
+
+        // Baixa: exibe quantidade disponível selecionada
+        stockOutAddress.addEventListener('change', () => {
+            stockOutAvailable.textContent = '';
+            stockOutQuantity.value = '';
+            stockOutQuantity.max = '';
+
+            if (!stockOutAddress.value) return;
+
+            const loc = allStockLocationsDocs.find(doc => doc.id === stockOutAddress.value);
+            if (loc) {
+                const qty = loc.data().quantity || 0;
+                stockOutAvailable.textContent = `Quantidade disponível: ${qty}`;
+                stockOutQuantity.max = qty;
             }
         });
         
