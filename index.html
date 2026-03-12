@@ -854,7 +854,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy, setDoc, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
         // ************************************************************************************
@@ -870,12 +870,27 @@
             measurementId: "G-ZVN8JKEB6P"
         };
         const appId = 'controle-almoxarifado-f93d1';
+        
+        // Projeto secundario para metadados/logs
+        const secondaryFirebaseConfig = {
+            apiKey: "AIzaSyAPZ34j3BEH8hi9Uvxg0KZXGiHfKCOiI4Y",
+            authDomain: "controle-almoxarifado-2.firebaseapp.com",
+            projectId: "controle-almoxarifado-2",
+            storageBucket: "controle-almoxarifado-2.firebasestorage.app",
+            messagingSenderId: "563378524835",
+            appId: "1:563378524835:web:d02358a5e7de6e483fa516",
+            measurementId: "G-F1V89XEWVS"
+        };
+        const secondaryAppId = 'controle-almoxarifado-2';
         // ************************************************************************************
 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
         const storage = getStorage(app);
+        const secondaryApp = initializeApp(secondaryFirebaseConfig, 'secondary');
+        const secondaryDb = getFirestore(secondaryApp);
+        const secondaryStorage = getStorage(secondaryApp);
         
         const loginLogoutBtn = document.getElementById('login-logout-btn');
         const tabDashboard = document.getElementById('tab-dashboard');
@@ -948,7 +963,7 @@
         const pendingCount = document.getElementById('pending-count');
 
 
-        let requisitionsCollection, itemsCollection, employeesCollection, stockLocationsCollection, kanbanEquipmentsCollection;
+        let requisitionsCollection, itemsCollection, employeesCollection, stockLocationsCollection, kanbanEquipmentsCollection, metaLogsCollection, metaCountersCollection;
         let unsubRequisitions = null, unsubItems = null, unsubEmployees = null, unsubStock = null, unsubKanban = null;
         let isLoggedIn = false;
         let isFirestoreReady = false;
@@ -1407,11 +1422,14 @@
                 await signInAnonymously(auth);
                 
                 const basePath = `/artifacts/${appId}/public/data`;
+                const metaBasePath = `/artifacts/${secondaryAppId}/public/meta`;
                 requisitionsCollection = collection(db, `${basePath}/requisitions`);
                 itemsCollection = collection(db, `${basePath}/items`);
                 employeesCollection = collection(db, `${basePath}/employees`);
                 stockLocationsCollection = collection(db, `${basePath}/stockLocations`);
                 kanbanEquipmentsCollection = collection(db, `${basePath}/kanbanEquipments`);
+                metaLogsCollection = collection(secondaryDb, `${metaBasePath}/logs`);
+                metaCountersCollection = collection(secondaryDb, `${metaBasePath}/counters`);
                 
                 isFirestoreReady = true;
 
@@ -1433,6 +1451,38 @@
         function debouncedRender(fn, delay = 100) {
             clearTimeout(renderTimeout);
             renderTimeout = setTimeout(fn, delay);
+        }
+
+        async function logMeta(eventType, payload = {}) {
+            if (!metaLogsCollection) return;
+            try {
+                await addDoc(metaLogsCollection, {
+                    eventType,
+                    payload,
+                    createdAt: serverTimestamp()
+                });
+            } catch (error) {
+                console.warn('Falha ao registrar metadado no projeto secundario:', error);
+            }
+        }
+
+        async function bumpCounter(eventType) {
+            if (!metaCountersCollection) return;
+            const now = new Date();
+            const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+            try {
+                await setDoc(
+                    doc(metaCountersCollection, `${eventType}_${dateStr}`),
+                    {
+                        eventType,
+                        date: dateStr,
+                        count: increment(1)
+                    },
+                    { merge: true }
+                );
+            } catch (error) {
+                console.warn('Falha ao incrementar contador no projeto secundario:', error);
+            }
         }
 
         async function fetchInitialData() {
@@ -1877,6 +1927,12 @@
                         status: 'Pendente',
                         createdAt: serverTimestamp()
                     });
+                    logMeta('requisition_create', {
+                        requester: requesterSelect.value,
+                        itemCode: item.code,
+                        quantity: Number(requisitionForm.quantity.value)
+                    });
+                    bumpCounter('requisition_create');
                     requisitionForm.reset();
                     selectedItemCodeInput.value = '';
                     departmentInput.value = '';
@@ -1935,6 +1991,8 @@
                         active: true,
                         photoBase64: photoBase64
                     }); 
+                    logMeta('item_create', { code: codeInput.value.trim(), description: document.getElementById('item-description').value.trim() });
+                    bumpCounter('item_create');
                     itemForm.reset();
                     document.getElementById('photo-preview').classList.add('hidden');
                     selectedPhotoFile = null;
@@ -1951,6 +2009,11 @@
                     name: employeeForm['employee-name'].value,
                     department: employeeForm['employee-department'].value
                 });
+                logMeta('employee_create', {
+                    name: employeeForm['employee-name'].value,
+                    department: employeeForm['employee-department'].value
+                });
+                bumpCounter('employee_create');
                 employeeForm.reset();
             });
             
@@ -1967,12 +2030,26 @@
                     if (existingLocation) {
                         const newQuantity = (existingLocation.data().quantity || 0) + quantityToAdd;
                         await updateDoc(doc(stockLocationsCollection, existingLocation.id), { quantity: newQuantity });
+                        logMeta('stock_entry', {
+                            itemCode: itemData.code,
+                            address,
+                            quantity: quantityToAdd,
+                            mode: 'increment'
+                        });
+                        bumpCounter('stock_entry');
                     } else {
                         await addDoc(stockLocationsCollection, {
                             itemCode: itemData.code,
                             address: address,
                             quantity: quantityToAdd
                         });
+                        logMeta('stock_entry', {
+                            itemCode: itemData.code,
+                            address,
+                            quantity: quantityToAdd,
+                            mode: 'new_location'
+                        });
+                        bumpCounter('stock_entry');
                     }
                     stockEntryForm.reset();
                 } catch (error) {
@@ -2027,6 +2104,14 @@
                         });
                     }
                     
+                    logMeta('stock_transfer', {
+                        itemCode: itemData.code,
+                        from: fromLocationData.address,
+                        to: toAddress,
+                        quantity: quantityToTransfer
+                    });
+                    bumpCounter('stock_transfer');
+                    
                     alert(`Transferência realizada com sucesso! ${quantityToTransfer} unidade(s) transferida(s).`);
                     stockTransferForm.reset();
                     transferFromAddress.innerHTML = '<option value="">Selecione a origem...</option>';
@@ -2064,6 +2149,12 @@
                 try {
                     const newQty = currentQty - quantityToOut;
                     await updateDoc(doc(stockLocationsCollection, locationId), { quantity: newQty });
+                    logMeta('stock_out', {
+                        itemCode: locDoc.data().itemCode,
+                        address: locDoc.data().address,
+                        quantity: quantityToOut
+                    });
+                    bumpCounter('stock_out');
                     alert('Baixa registrada com sucesso.');
                     stockOutForm.reset();
                     stockOutAddress.innerHTML = '<option value="">Selecione o endereço...</option>';
@@ -2245,6 +2336,8 @@
 
             try {
                 await updateDoc(itemRef, updatedData);
+                logMeta('item_update', { itemId, fields: Object.keys(updatedData) });
+                bumpCounter('item_update');
                 editItemModal.classList.add('hidden');
                 shouldRemoveEditPhoto = false;
             } catch (error) {
@@ -2267,6 +2360,8 @@
             try {
                 const itemRef = doc(itemsCollection, itemId);
                 await updateDoc(itemRef, { active: newActiveState });
+                logMeta('item_toggle_active', { itemId, active: newActiveState });
+                bumpCounter('item_toggle_active');
             } catch (error) {
                 console.error("Erro ao alterar status do item: ", error);
                 alert("Falha ao alterar o status do item.");
@@ -2341,6 +2436,12 @@
                     
                     transaction.update(reqDocRef, updateData);
                 });
+                logMeta('requisition_status_update', {
+                    reqId,
+                    from: oldStatus,
+                    to: newStatus
+                });
+                bumpCounter('requisition_status_update');
                 statusModal.classList.add('hidden');
             } catch (error) {
                 console.error("Erro na transação de status: ", error);
@@ -2383,6 +2484,12 @@
                     };
                     transaction.update(reqDocRef, updateData);
                 });
+                logMeta('requisition_delivery', {
+                    reqId,
+                    locationId,
+                    status: 'Entregue'
+                });
+                bumpCounter('requisition_delivery');
                 locationSelectModal.classList.add('hidden');
             } catch (error) {
                 console.error("Erro ao confirmar entrega: ", error);
@@ -3162,10 +3269,19 @@
         }
 
         function handleBarcodeSearch() {
-            const codeToFind = stockItemSearchInput.value.trim();
-            if (!codeToFind) return;
+            const rawTerm = stockItemSearchInput.value.trim();
+            if (!rawTerm) return;
 
-            const foundItemDoc = allItemsDocs.find(doc => doc.data().code === codeToFind);
+            const term = rawTerm.toLowerCase();
+
+            // Prioriza match exato do código; se não achar, aceita trechos do código ou descrição
+            const foundItemDoc = allItemsDocs.find(doc => {
+                const data = doc.data();
+                const code = (data.code || '').toLowerCase();
+                const desc = (data.description || '').toLowerCase();
+                if (code === term) return true; // leitor de código de barras
+                return code.includes(term) || desc.includes(term);
+            });
 
             if (foundItemDoc) {
                 const itemData = foundItemDoc.data();
@@ -3175,7 +3291,7 @@
                 stockItemSearchInput.value = '';
                 document.getElementById('stock-entry-address').focus();
             } else {
-                alert('Item com o código "' + codeToFind + '" não encontrado.');
+                alert('Item com o termo "' + rawTerm + '" não encontrado.');
                 stockItemSelect.value = '';
                 stockItemSearchInput.value = '';
                 stockItemSearchInput.focus();
