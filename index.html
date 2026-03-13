@@ -891,6 +891,7 @@
         const secondaryApp = initializeApp(secondaryFirebaseConfig, 'secondary');
         const secondaryDb = getFirestore(secondaryApp);
         const secondaryStorage = getStorage(secondaryApp);
+        const secondaryAuth = getAuth(secondaryApp);
         
         const loginLogoutBtn = document.getElementById('login-logout-btn');
         const tabDashboard = document.getElementById('tab-dashboard');
@@ -1420,6 +1421,12 @@
         async function setupAuthAndFirestore() {
             try {
                 await signInAnonymously(auth);
+                // Autentica também no projeto secundário para permitir gravações de metadados/contadores
+                try {
+                    await signInAnonymously(secondaryAuth);
+                } catch (secAuthErr) {
+                    console.warn('Login anonimo no projeto secundario falhou:', secAuthErr);
+                }
                 
                 const basePath = `/artifacts/${appId}/public/data`;
                 const metaBasePath = `/artifacts/${secondaryAppId}/public/meta`;
