@@ -854,7 +854,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy, setDoc, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy, limit, setDoc, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
         // ************************************************************************************
@@ -965,6 +965,7 @@
 
 
         let requisitionsCollection, itemsCollection, employeesCollection, stockLocationsCollection, kanbanEquipmentsCollection, metaLogsCollection, metaCountersCollection;
+        let requisitionsReadCollection, itemsReadCollection, employeesReadCollection, stockLocationsReadCollection, kanbanEquipmentsReadCollection;
         let unsubRequisitions = null, unsubItems = null, unsubEmployees = null, unsubStock = null, unsubKanban = null;
         let isLoggedIn = false;
         let isFirestoreReady = false;
@@ -1430,11 +1431,21 @@
                 
                 const basePath = `/artifacts/${appId}/public/data`;
                 const metaBasePath = `/artifacts/${secondaryAppId}/public/meta`;
+
+                // Escrita (DB principal)
                 requisitionsCollection = collection(db, `${basePath}/requisitions`);
                 itemsCollection = collection(db, `${basePath}/items`);
                 employeesCollection = collection(db, `${basePath}/employees`);
                 stockLocationsCollection = collection(db, `${basePath}/stockLocations`);
                 kanbanEquipmentsCollection = collection(db, `${basePath}/kanbanEquipments`);
+
+                // Leitura intensa/dashboard (DB secundário)
+                requisitionsReadCollection = collection(secondaryDb, `${basePath}/requisitions`);
+                itemsReadCollection = collection(secondaryDb, `${basePath}/items`);
+                employeesReadCollection = collection(secondaryDb, `${basePath}/employees`);
+                stockLocationsReadCollection = collection(secondaryDb, `${basePath}/stockLocations`);
+                kanbanEquipmentsReadCollection = collection(secondaryDb, `${basePath}/kanbanEquipments`);
+
                 metaLogsCollection = collection(secondaryDb, `${metaBasePath}/logs`);
                 metaCountersCollection = collection(secondaryDb, `${metaBasePath}/counters`);
                 
@@ -1501,11 +1512,11 @@
                 loadingStock.classList.remove('hidden');
 
                 const [reqSnap, empSnap, itemSnap, stockSnap, kanbanSnap] = await Promise.all([
-                    getDocs(query(requisitionsCollection, orderBy('createdAt', 'desc'))),
-                    getDocs(employeesCollection),
-                    getDocs(itemsCollection),
-                    getDocs(stockLocationsCollection),
-                    getDocs(kanbanEquipmentsCollection)
+                    getDocs(query(requisitionsReadCollection || requisitionsCollection, orderBy('createdAt', 'desc'), limit(500))),
+                    getDocs(employeesReadCollection || employeesCollection),
+                    getDocs(itemsReadCollection || itemsCollection),
+                    getDocs(stockLocationsReadCollection || stockLocationsCollection),
+                    getDocs(kanbanEquipmentsReadCollection || kanbanEquipmentsCollection)
                 ]);
 
                 allRequisitionsDocs = reqSnap.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
@@ -1536,7 +1547,7 @@
 
             if (!unsubRequisitions) {
                 loadingRequisitions.classList.remove('hidden');
-                unsubRequisitions = onSnapshot(query(requisitionsCollection, orderBy('createdAt', 'desc')), s => {
+                unsubRequisitions = onSnapshot(query(requisitionsReadCollection || requisitionsCollection, orderBy('createdAt', 'desc'), limit(500)), s => {
                     allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
                     renderRequisitions();
                     renderMonthlyConsumptionChart();
@@ -1548,7 +1559,7 @@
 
             if (!unsubEmployees) {
                 loadingEmployees.classList.remove('hidden');
-                unsubEmployees = onSnapshot(employeesCollection, s => {
+                unsubEmployees = onSnapshot(employeesReadCollection || employeesCollection, s => {
                     allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name));
                     renderEmployees();
                     populateSelects();
@@ -1558,7 +1569,7 @@
 
             if (!unsubItems) {
                 loadingItems.classList.remove('hidden');
-                unsubItems = onSnapshot(itemsCollection, s => {
+                unsubItems = onSnapshot(itemsReadCollection || itemsCollection, s => {
                     allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description));
                     renderItems();
                     renderStock();
@@ -1570,7 +1581,7 @@
 
             if (!unsubStock) {
                 loadingStock.classList.remove('hidden');
-                unsubStock = onSnapshot(stockLocationsCollection, s => {
+                unsubStock = onSnapshot(stockLocationsReadCollection || stockLocationsCollection, s => {
                     allStockLocationsDocs = s.docs.sort((a, b) => a.data().address.localeCompare(b.data().address));
                     renderStock();
                     renderItems();
@@ -1579,7 +1590,7 @@
             }
 
             if (!unsubKanban) {
-                unsubKanban = onSnapshot(kanbanEquipmentsCollection, s => {
+                unsubKanban = onSnapshot(kanbanEquipmentsReadCollection || kanbanEquipmentsCollection, s => {
                     allKanbanEquipmentsDocs = s.docs;
                     renderKanbanBoard();
                 });
