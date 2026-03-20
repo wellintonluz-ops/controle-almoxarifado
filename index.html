@@ -986,6 +986,11 @@
         let monthlyRequestsYears = [];
         let selectedMonthlyYear = new Date().getFullYear();
         let monthlyItemSearchTerm = '';
+        let useSecondaryReads = false;
+
+        function getReadCollection(primary, secondary) {
+            return (useSecondaryReads && secondary) ? secondary : primary;
+        }
 
         function getRequestBaseDate(data) {
             const updated = data.statusUpdatedAt?.toDate();
@@ -1448,6 +1453,15 @@
 
                 metaLogsCollection = collection(secondaryDb, `${metaBasePath}/logs`);
                 metaCountersCollection = collection(secondaryDb, `${metaBasePath}/counters`);
+
+                // Testar se secundario está populado. Se não, usa primario (sem perder dados existentes).
+                try {
+                    const testSnap = await getDocs(query(requisitionsReadCollection, orderBy('createdAt', 'desc'), limit(1)));
+                    useSecondaryReads = testSnap.size > 0;
+                } catch (err) {
+                    console.warn('Não foi possível usar leitura secundária (fallback para primário):', err);
+                    useSecondaryReads = false;
+                }
                 
                 isFirestoreReady = true;
 
@@ -1512,11 +1526,11 @@
                 loadingStock.classList.remove('hidden');
 
                 const [reqSnap, empSnap, itemSnap, stockSnap, kanbanSnap] = await Promise.all([
-                    getDocs(query(requisitionsReadCollection || requisitionsCollection, orderBy('createdAt', 'desc'), limit(500))),
-                    getDocs(employeesReadCollection || employeesCollection),
-                    getDocs(itemsReadCollection || itemsCollection),
-                    getDocs(stockLocationsReadCollection || stockLocationsCollection),
-                    getDocs(kanbanEquipmentsReadCollection || kanbanEquipmentsCollection)
+                    getDocs(query(getReadCollection(requisitionsCollection, requisitionsReadCollection), orderBy('createdAt', 'desc'), limit(500))),
+                    getDocs(getReadCollection(employeesCollection, employeesReadCollection)),
+                    getDocs(getReadCollection(itemsCollection, itemsReadCollection)),
+                    getDocs(getReadCollection(stockLocationsCollection, stockLocationsReadCollection)),
+                    getDocs(getReadCollection(kanbanEquipmentsCollection, kanbanEquipmentsReadCollection))
                 ]);
 
                 allRequisitionsDocs = reqSnap.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
@@ -1547,7 +1561,7 @@
 
             if (!unsubRequisitions) {
                 loadingRequisitions.classList.remove('hidden');
-                unsubRequisitions = onSnapshot(query(requisitionsReadCollection || requisitionsCollection, orderBy('createdAt', 'desc'), limit(500)), s => {
+                unsubRequisitions = onSnapshot(query(getReadCollection(requisitionsCollection, requisitionsReadCollection), orderBy('createdAt', 'desc'), limit(500)), s => {
                     allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
                     renderRequisitions();
                     renderMonthlyConsumptionChart();
@@ -1559,7 +1573,7 @@
 
             if (!unsubEmployees) {
                 loadingEmployees.classList.remove('hidden');
-                unsubEmployees = onSnapshot(employeesReadCollection || employeesCollection, s => {
+                unsubEmployees = onSnapshot(getReadCollection(employeesCollection, employeesReadCollection), s => {
                     allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name));
                     renderEmployees();
                     populateSelects();
@@ -1569,7 +1583,7 @@
 
             if (!unsubItems) {
                 loadingItems.classList.remove('hidden');
-                unsubItems = onSnapshot(itemsReadCollection || itemsCollection, s => {
+                unsubItems = onSnapshot(getReadCollection(itemsCollection, itemsReadCollection), s => {
                     allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description));
                     renderItems();
                     renderStock();
@@ -1581,7 +1595,7 @@
 
             if (!unsubStock) {
                 loadingStock.classList.remove('hidden');
-                unsubStock = onSnapshot(stockLocationsReadCollection || stockLocationsCollection, s => {
+                unsubStock = onSnapshot(getReadCollection(stockLocationsCollection, stockLocationsReadCollection), s => {
                     allStockLocationsDocs = s.docs.sort((a, b) => a.data().address.localeCompare(b.data().address));
                     renderStock();
                     renderItems();
@@ -1590,7 +1604,7 @@
             }
 
             if (!unsubKanban) {
-                unsubKanban = onSnapshot(kanbanEquipmentsReadCollection || kanbanEquipmentsCollection, s => {
+                unsubKanban = onSnapshot(getReadCollection(kanbanEquipmentsCollection, kanbanEquipmentsReadCollection), s => {
                     allKanbanEquipmentsDocs = s.docs;
                     renderKanbanBoard();
                 });
