@@ -854,7 +854,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy, limit, setDoc, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy, setDoc, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
         // ************************************************************************************
@@ -965,7 +965,6 @@
 
 
         let requisitionsCollection, itemsCollection, employeesCollection, stockLocationsCollection, kanbanEquipmentsCollection, metaLogsCollection, metaCountersCollection;
-        let requisitionsReadCollection, itemsReadCollection, employeesReadCollection, stockLocationsReadCollection, kanbanEquipmentsReadCollection;
         let unsubRequisitions = null, unsubItems = null, unsubEmployees = null, unsubStock = null, unsubKanban = null;
         let isLoggedIn = false;
         let isFirestoreReady = false;
@@ -986,11 +985,6 @@
         let monthlyRequestsYears = [];
         let selectedMonthlyYear = new Date().getFullYear();
         let monthlyItemSearchTerm = '';
-        let useSecondaryReads = false;
-
-        function getReadCollection(primary, secondary) {
-            return (useSecondaryReads && secondary) ? secondary : primary;
-        }
 
         function getRequestBaseDate(data) {
             const updated = data.statusUpdatedAt?.toDate();
@@ -1436,32 +1430,13 @@
                 
                 const basePath = `/artifacts/${appId}/public/data`;
                 const metaBasePath = `/artifacts/${secondaryAppId}/public/meta`;
-
-                // Escrita (DB principal)
                 requisitionsCollection = collection(db, `${basePath}/requisitions`);
                 itemsCollection = collection(db, `${basePath}/items`);
                 employeesCollection = collection(db, `${basePath}/employees`);
                 stockLocationsCollection = collection(db, `${basePath}/stockLocations`);
                 kanbanEquipmentsCollection = collection(db, `${basePath}/kanbanEquipments`);
-
-                // Leitura intensa/dashboard (DB secundário)
-                requisitionsReadCollection = collection(secondaryDb, `${basePath}/requisitions`);
-                itemsReadCollection = collection(secondaryDb, `${basePath}/items`);
-                employeesReadCollection = collection(secondaryDb, `${basePath}/employees`);
-                stockLocationsReadCollection = collection(secondaryDb, `${basePath}/stockLocations`);
-                kanbanEquipmentsReadCollection = collection(secondaryDb, `${basePath}/kanbanEquipments`);
-
                 metaLogsCollection = collection(secondaryDb, `${metaBasePath}/logs`);
                 metaCountersCollection = collection(secondaryDb, `${metaBasePath}/counters`);
-
-                // Testar se secundario está populado. Se não, usa primario (sem perder dados existentes).
-                try {
-                    const testSnap = await getDocs(query(requisitionsReadCollection, orderBy('createdAt', 'desc'), limit(1)));
-                    useSecondaryReads = testSnap.size > 0;
-                } catch (err) {
-                    console.warn('Não foi possível usar leitura secundária (fallback para primário):', err);
-                    useSecondaryReads = false;
-                }
                 
                 isFirestoreReady = true;
 
@@ -1526,11 +1501,11 @@
                 loadingStock.classList.remove('hidden');
 
                 const [reqSnap, empSnap, itemSnap, stockSnap, kanbanSnap] = await Promise.all([
-                    getDocs(query(getReadCollection(requisitionsCollection, requisitionsReadCollection), orderBy('createdAt', 'desc'), limit(500))),
-                    getDocs(getReadCollection(employeesCollection, employeesReadCollection)),
-                    getDocs(getReadCollection(itemsCollection, itemsReadCollection)),
-                    getDocs(getReadCollection(stockLocationsCollection, stockLocationsReadCollection)),
-                    getDocs(getReadCollection(kanbanEquipmentsCollection, kanbanEquipmentsReadCollection))
+                    getDocs(query(requisitionsCollection, orderBy('createdAt', 'desc'))),
+                    getDocs(employeesCollection),
+                    getDocs(itemsCollection),
+                    getDocs(stockLocationsCollection),
+                    getDocs(kanbanEquipmentsCollection)
                 ]);
 
                 allRequisitionsDocs = reqSnap.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
@@ -1561,7 +1536,7 @@
 
             if (!unsubRequisitions) {
                 loadingRequisitions.classList.remove('hidden');
-                unsubRequisitions = onSnapshot(query(getReadCollection(requisitionsCollection, requisitionsReadCollection), orderBy('createdAt', 'desc'), limit(500)), s => {
+                unsubRequisitions = onSnapshot(query(requisitionsCollection, orderBy('createdAt', 'desc')), s => {
                     allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
                     renderRequisitions();
                     renderMonthlyConsumptionChart();
@@ -1573,7 +1548,7 @@
 
             if (!unsubEmployees) {
                 loadingEmployees.classList.remove('hidden');
-                unsubEmployees = onSnapshot(getReadCollection(employeesCollection, employeesReadCollection), s => {
+                unsubEmployees = onSnapshot(employeesCollection, s => {
                     allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name));
                     renderEmployees();
                     populateSelects();
@@ -1583,7 +1558,7 @@
 
             if (!unsubItems) {
                 loadingItems.classList.remove('hidden');
-                unsubItems = onSnapshot(getReadCollection(itemsCollection, itemsReadCollection), s => {
+                unsubItems = onSnapshot(itemsCollection, s => {
                     allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description));
                     renderItems();
                     renderStock();
@@ -1595,7 +1570,7 @@
 
             if (!unsubStock) {
                 loadingStock.classList.remove('hidden');
-                unsubStock = onSnapshot(getReadCollection(stockLocationsCollection, stockLocationsReadCollection), s => {
+                unsubStock = onSnapshot(stockLocationsCollection, s => {
                     allStockLocationsDocs = s.docs.sort((a, b) => a.data().address.localeCompare(b.data().address));
                     renderStock();
                     renderItems();
@@ -1604,7 +1579,7 @@
             }
 
             if (!unsubKanban) {
-                unsubKanban = onSnapshot(getReadCollection(kanbanEquipmentsCollection, kanbanEquipmentsReadCollection), s => {
+                unsubKanban = onSnapshot(kanbanEquipmentsCollection, s => {
                     allKanbanEquipmentsDocs = s.docs;
                     renderKanbanBoard();
                 });
