@@ -1008,6 +1008,21 @@
             return `${minutes}m`;
         }
 
+        function normalizeText(str) {
+            return (str || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        }
+
+        function matchesRequisitionSearch(data, normalizedTerm) {
+            if (!normalizedTerm) return true;
+            const haystack = [
+                data.requester,
+                data.itemDescription,
+                data.item,
+                data.itemCode
+            ].map(normalizeText).join(' ');
+            return haystack.includes(normalizedTerm);
+        }
+
         function updateAverageRequestTime() {
             if (!avgReqTimeEl || !avgReqTimeDetailEl) return;
 
@@ -1384,9 +1399,14 @@
                     e.preventDefault();
                     // Pega os filtros atuais
                     const statusFilter = filterStatus.value;
-                    const requesterFilter = filterRequester.value.trim().toLowerCase();
+                    const requesterFilter = normalizeText(filterRequester.value.trim());
                     // Filtra todas as requisições
-                    let filteredDocs = allRequisitionsDocs.filter(doc => (statusFilter === 'Todos' || doc.data().status === statusFilter) && (!requesterFilter || doc.data().requester.toLowerCase().includes(requesterFilter)));
+                    let filteredDocs = allRequisitionsDocs.filter(doc => {
+                        const data = doc.data();
+                        const matchesStatus = (statusFilter === 'Todos' || data.status === statusFilter);
+                        const matchesSearch = matchesRequisitionSearch(data, requesterFilter);
+                        return matchesStatus && matchesSearch;
+                    });
                     if (filteredDocs.length === 0) {
                         alert('Nenhuma requisição encontrada para exportar.');
                         return;
@@ -1449,11 +1469,11 @@
                                 // Escrita/Leitura de novas requisicoes (DB secundário)
                                 requisitionsCollectionSecondary = collection(secondaryDb, `${secondaryBasePath}/requisitions`);
 
-                // Leitura intensa/dashboard (DB secundário)
-                itemsReadCollection = collection(secondaryDb, `${secondaryBasePath}/items`);
-                employeesReadCollection = collection(secondaryDb, `${secondaryBasePath}/employees`);
-                stockLocationsReadCollection = collection(secondaryDb, `${secondaryBasePath}/stockLocations`);
-                kanbanEquipmentsReadCollection = collection(secondaryDb, `${secondaryBasePath}/kanbanEquipments`);
+                // Leitura padrão (usar primário; secundário só quando tivermos replicação)
+                itemsReadCollection = itemsCollection;
+                employeesReadCollection = employeesCollection;
+                stockLocationsReadCollection = stockLocationsCollection;
+                kanbanEquipmentsReadCollection = kanbanEquipmentsCollection;
 
                 metaLogsCollection = collection(secondaryDb, `${metaBasePath}/logs`);
                 metaCountersCollection = collection(secondaryDb, `${metaBasePath}/counters`);
@@ -1664,10 +1684,15 @@
 
         const renderRequisitions = () => {
             const statusFilter = filterStatus.value;
-            const requesterFilter = filterRequester.value.trim().toLowerCase();
+            const requesterFilter = normalizeText(filterRequester.value.trim());
             requisitionsListBody.innerHTML = '';
             
-            let filteredDocs = allRequisitionsDocs.filter(doc => (statusFilter === 'Todos' || doc.data().status === statusFilter) && (!requesterFilter || doc.data().requester.toLowerCase().includes(requesterFilter)));
+            let filteredDocs = allRequisitionsDocs.filter(doc => {
+                const data = doc.data();
+                const matchesStatus = (statusFilter === 'Todos' || data.status === statusFilter);
+                const matchesSearch = matchesRequisitionSearch(data, requesterFilter);
+                return matchesStatus && matchesSearch;
+            });
             noRequisitionsMessage.classList.toggle('hidden', filteredDocs.length > 0);
             
             // Atualizar badge de pendentes
@@ -1720,8 +1745,13 @@
                     
                     nextBtn.addEventListener('click', () => {
                         const statusFilter = filterStatus.value;
-                        const requesterFilter = filterRequester.value.trim().toLowerCase();
-                        const filteredCount = allRequisitionsDocs.filter(doc => (statusFilter === 'Todos' || doc.data().status === statusFilter) && (!requesterFilter || doc.data().requester.toLowerCase().includes(requesterFilter))).length;
+                        const requesterFilter = normalizeText(filterRequester.value.trim());
+                        const filteredCount = allRequisitionsDocs.filter(doc => {
+                            const data = doc.data();
+                            const matchesStatus = (statusFilter === 'Todos' || data.status === statusFilter);
+                            const matchesSearch = matchesRequisitionSearch(data, requesterFilter);
+                            return matchesStatus && matchesSearch;
+                        }).length;
                         const totalPages = Math.ceil(filteredCount / requisitionsPerPage);
                         if (currentRequisitionsPage < totalPages) {
                             currentRequisitionsPage++;
