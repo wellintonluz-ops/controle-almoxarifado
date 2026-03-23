@@ -398,7 +398,7 @@
                     <div class="flex-1"><label for="filter-status" class="block text-sm font-medium text-gray-700">Filtrar por Status</label><select id="filter-status" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"><option>Todos</option><option>Pendente</option><option>Rejeitado</option><option>Entregue</option></select></div>
                     <div class="flex-1 mt-4 md:mt-0"><label for="filter-requester" class="block text-sm font-medium text-gray-700">Filtrar por Solicitante</label><input type="text" id="filter-requester" placeholder="Digite o nome..." class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
                 </div>
-                <div class="overflow-x-auto"><table class="min-w-full divide-y divide-gray-200"><thead class="bg-gray-50"><tr><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Solicitante</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qtd.</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Última Atualização</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th></tr></thead><tbody id="requisitions-list" class="bg-white divide-y divide-gray-200"></tbody></table><p id="no-requisitions" class="text-center text-gray-500 py-8 hidden">Nenhuma requisição encontrada.</p></div>
+                <div class="overflow-x-auto"><table class="min-w-full divide-y divide-gray-200"><thead class="bg-gray-50"><tr><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Solicitante</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qtd.</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Justificativa</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Última Atualização</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th></tr></thead><tbody id="requisitions-list" class="bg-white divide-y divide-gray-200"></tbody></table><p id="no-requisitions" class="text-center text-gray-500 py-8 hidden">Nenhuma requisição encontrada.</p></div>
                 <div id="requisitions-pagination" class="flex justify-between items-center mt-4 hidden">
                     <button id="prev-page" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 disabled:opacity-50 disabled:cursor-not-allowed" disabled>Anterior</button>
                     <span id="page-info" class="text-sm text-gray-600">Página 1</span>
@@ -854,7 +854,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy, setDoc, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy, limit, setDoc, increment, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
         // ************************************************************************************
@@ -964,11 +964,12 @@
         const pendingCount = document.getElementById('pending-count');
 
 
-        let requisitionsCollection, itemsCollection, employeesCollection, stockLocationsCollection, kanbanEquipmentsCollection, metaLogsCollection, metaCountersCollection;
+        let requisitionsCollectionPrimary, requisitionsCollectionSecondary, itemsCollection, employeesCollection, stockLocationsCollection, kanbanEquipmentsCollection, metaLogsCollection, metaCountersCollection;
+        let itemsReadCollection, employeesReadCollection, stockLocationsReadCollection, kanbanEquipmentsReadCollection;
         let unsubRequisitions = null, unsubItems = null, unsubEmployees = null, unsubStock = null, unsubKanban = null;
         let isLoggedIn = false;
         let isFirestoreReady = false;
-        let allRequisitionsDocs = [], allItemsDocs = [], allEmployeesDocs = [], allStockLocationsDocs = [], allKanbanEquipmentsDocs = [];
+        let oldRequisitionsDocs = [], newRequisitionsDocs = [], allRequisitionsDocs = [], allItemsDocs = [], allEmployeesDocs = [], allStockLocationsDocs = [], allKanbanEquipmentsDocs = [];
         let consumptionChart = null;
 
         let formListenersAttached = false; // Flag para evitar duplicação de listeners
@@ -985,6 +986,11 @@
         let monthlyRequestsYears = [];
         let selectedMonthlyYear = new Date().getFullYear();
         let monthlyItemSearchTerm = '';
+        let allowSecondary = true;
+
+        function getReadCollection(primary, secondary) {
+            return (allowSecondary && secondary) ? secondary : primary;
+        }
 
         function getRequestBaseDate(data) {
             const updated = data.statusUpdatedAt?.toDate();
@@ -1426,18 +1432,43 @@
                     await signInAnonymously(secondaryAuth);
                 } catch (secAuthErr) {
                     console.warn('Login anonimo no projeto secundario falhou:', secAuthErr);
+                    allowSecondary = false;
                 }
                 
                 const basePath = `/artifacts/${appId}/public/data`;
                 const metaBasePath = `/artifacts/${secondaryAppId}/public/meta`;
-                requisitionsCollection = collection(db, `${basePath}/requisitions`);
+                                const secondaryBasePath = `/artifacts/${secondaryAppId}/public/data`;
+
+                                // Escrita (DB principal)
+                                requisitionsCollectionPrimary = collection(db, `${basePath}/requisitions`);
                 itemsCollection = collection(db, `${basePath}/items`);
                 employeesCollection = collection(db, `${basePath}/employees`);
                 stockLocationsCollection = collection(db, `${basePath}/stockLocations`);
                 kanbanEquipmentsCollection = collection(db, `${basePath}/kanbanEquipments`);
+
+                                // Escrita/Leitura de novas requisicoes (DB secundário)
+                                requisitionsCollectionSecondary = collection(secondaryDb, `${secondaryBasePath}/requisitions`);
+
+                // Leitura intensa/dashboard (DB secundário)
+                itemsReadCollection = collection(secondaryDb, `${secondaryBasePath}/items`);
+                employeesReadCollection = collection(secondaryDb, `${secondaryBasePath}/employees`);
+                stockLocationsReadCollection = collection(secondaryDb, `${secondaryBasePath}/stockLocations`);
+                kanbanEquipmentsReadCollection = collection(secondaryDb, `${secondaryBasePath}/kanbanEquipments`);
+
                 metaLogsCollection = collection(secondaryDb, `${metaBasePath}/logs`);
                 metaCountersCollection = collection(secondaryDb, `${metaBasePath}/counters`);
-                
+
+                // Testa acesso à coleção de novas requisições; se falhar, desabilita uso do secundário
+                if (allowSecondary) {
+                    try {
+                        await getDocs(query(requisitionsCollectionSecondary, limit(1)));
+                        allowSecondary = true;
+                    } catch (err) {
+                        console.warn('Sem permissão no projeto secundário, usando apenas projeto 1:', err);
+                        allowSecondary = false;
+                    }
+                }
+
                 isFirestoreReady = true;
 
                 await fetchInitialData();
@@ -1500,15 +1531,24 @@
                 loadingItems.classList.remove('hidden');
                 loadingStock.classList.remove('hidden');
 
-                const [reqSnap, empSnap, itemSnap, stockSnap, kanbanSnap] = await Promise.all([
-                    getDocs(query(requisitionsCollection, orderBy('createdAt', 'desc'))),
-                    getDocs(employeesCollection),
-                    getDocs(itemsCollection),
-                    getDocs(stockLocationsCollection),
-                    getDocs(kanbanEquipmentsCollection)
+                const reqOldSnapPromise = getDocs(query(requisitionsCollectionPrimary, orderBy('createdAt', 'desc'), limit(500)));
+                const reqNewSnapPromise = allowSecondary
+                    ? getDocs(query(requisitionsCollectionSecondary, orderBy('createdAt', 'desc'), limit(500)))
+                    : Promise.resolve({ docs: [] });
+
+                const [reqOldSnap, reqNewSnap, empSnap, itemSnap, stockSnap, kanbanSnap] = await Promise.all([
+                    reqOldSnapPromise,
+                    reqNewSnapPromise,
+                    getDocs(getReadCollection(employeesCollection, employeesReadCollection)),
+                    getDocs(getReadCollection(itemsCollection, itemsReadCollection)),
+                    getDocs(getReadCollection(stockLocationsCollection, stockLocationsReadCollection)),
+                    getDocs(getReadCollection(kanbanEquipmentsCollection, kanbanEquipmentsReadCollection))
                 ]);
 
-                allRequisitionsDocs = reqSnap.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
+                const wrapDoc = (snap, source) => ({ id: snap.id, data: () => snap.data(), source });
+                oldRequisitionsDocs = reqOldSnap.docs.map(d => wrapDoc(d, 'old'));
+                newRequisitionsDocs = reqNewSnap.docs.map(d => wrapDoc(d, 'new'));
+                allRequisitionsDocs = [...newRequisitionsDocs, ...oldRequisitionsDocs].sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
                 allEmployeesDocs = empSnap.docs.sort((a, b) => a.data().name.localeCompare(b.data().name));
                 allItemsDocs = itemSnap.docs.sort((a, b) => a.data().description.localeCompare(b.data().description));
                 allStockLocationsDocs = stockSnap.docs.sort((a, b) => a.data().address.localeCompare(b.data().address));
@@ -1534,21 +1574,29 @@
         function startRealtimeListeners() {
             if (!isFirestoreReady) return;
 
-            if (!unsubRequisitions) {
+            if (!unsubRequisitions && allowSecondary) {
                 loadingRequisitions.classList.remove('hidden');
-                unsubRequisitions = onSnapshot(query(requisitionsCollection, orderBy('createdAt', 'desc')), s => {
-                    allRequisitionsDocs = s.docs.sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
-                    renderRequisitions();
-                    renderMonthlyConsumptionChart();
-                    renderMonthlyRequests();
-                    updateAverageRequestTime();
+                try {
+                    unsubRequisitions = onSnapshot(query(requisitionsCollectionSecondary, orderBy('createdAt', 'desc'), limit(500)), s => {
+                        const wrapDoc = (snap, source) => ({ id: snap.id, data: () => snap.data(), source });
+                        newRequisitionsDocs = s.docs.map(d => wrapDoc(d, 'new'));
+                        allRequisitionsDocs = [...newRequisitionsDocs, ...oldRequisitionsDocs].sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
+                        renderRequisitions();
+                        renderMonthlyConsumptionChart();
+                        renderMonthlyRequests();
+                        updateAverageRequestTime();
+                        loadingRequisitions.classList.add('hidden');
+                    });
+                } catch (err) {
+                    console.warn('Snapshot secundário indisponível, mantendo somente histórico:', err);
+                    allowSecondary = false;
                     loadingRequisitions.classList.add('hidden');
-                });
+                }
             }
 
             if (!unsubEmployees) {
                 loadingEmployees.classList.remove('hidden');
-                unsubEmployees = onSnapshot(employeesCollection, s => {
+                unsubEmployees = onSnapshot(getReadCollection(employeesCollection, employeesReadCollection), s => {
                     allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name));
                     renderEmployees();
                     populateSelects();
@@ -1558,7 +1606,7 @@
 
             if (!unsubItems) {
                 loadingItems.classList.remove('hidden');
-                unsubItems = onSnapshot(itemsCollection, s => {
+                unsubItems = onSnapshot(getReadCollection(itemsCollection, itemsReadCollection), s => {
                     allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description));
                     renderItems();
                     renderStock();
@@ -1570,7 +1618,7 @@
 
             if (!unsubStock) {
                 loadingStock.classList.remove('hidden');
-                unsubStock = onSnapshot(stockLocationsCollection, s => {
+                unsubStock = onSnapshot(getReadCollection(stockLocationsCollection, stockLocationsReadCollection), s => {
                     allStockLocationsDocs = s.docs.sort((a, b) => a.data().address.localeCompare(b.data().address));
                     renderStock();
                     renderItems();
@@ -1579,7 +1627,7 @@
             }
 
             if (!unsubKanban) {
-                unsubKanban = onSnapshot(kanbanEquipmentsCollection, s => {
+                unsubKanban = onSnapshot(getReadCollection(kanbanEquipmentsCollection, kanbanEquipmentsReadCollection), s => {
                     allKanbanEquipmentsDocs = s.docs;
                     renderKanbanBoard();
                 });
@@ -1652,7 +1700,8 @@
                 const date = data.createdAt?.toDate().toLocaleDateString('pt-BR') || 'N/A';
                 const updatedAtText = data.statusUpdatedAt ? data.statusUpdatedAt.toDate().toLocaleString('pt-BR') : '-';
                 const itemDisplay = data.itemCode ? `[${data.itemCode}] - ${data.itemDescription}` : data.item;
-                requisitionsListBody.innerHTML += `<tr class="hover:bg-gray-50"><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${date}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${data.requester}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemDisplay}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${data.quantity}</td><td class="px-6 py-4 whitespace-nowrap"><span class="status-badge status-${data.status.toLowerCase()}">${data.status}</span></td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${updatedAtText}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium"><button data-id="${id}" data-status="${data.status}" class="update-status-btn ${!isLoggedIn ? 'text-gray-400 cursor-not-allowed' : 'text-blue-600 hover:text-blue-900'}" ${!isLoggedIn ? 'disabled' : ''}>Alterar</button></td></tr>`;
+                const justification = data.justification ? (data.justification.length > 50 ? `${data.justification.slice(0, 50)}...` : data.justification) : '-';
+                requisitionsListBody.innerHTML += `<tr class="hover:bg-gray-50"><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${date}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${data.requester}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemDisplay}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${data.quantity}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" title="${data.justification || ''}">${justification}</td><td class="px-6 py-4 whitespace-nowrap"><span class="status-badge status-${data.status.toLowerCase()}">${data.status}</span></td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${updatedAtText}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium"><button data-id="${id}" data-status="${data.status}" class="update-status-btn ${!isLoggedIn ? 'text-gray-400 cursor-not-allowed' : 'text-blue-600 hover:text-blue-900'}" ${!isLoggedIn ? 'disabled' : ''}>Alterar</button></td></tr>`;
             });
             document.querySelectorAll('.update-status-btn:not([disabled])').forEach(b => b.addEventListener('click', (e) => openStatusModal(e.target)));
             
@@ -1924,7 +1973,7 @@
                 
                 try {
                     const item = JSON.parse(itemSelect.value);
-                    await addDoc(requisitionsCollection, {
+                    await addDoc(requisitionsCollectionSecondary, {
                         requester: requesterSelect.value,
                         department: departmentInput.value,
                         itemCode: item.code,
@@ -2421,28 +2470,32 @@
             }
             
             try {
-                await runTransaction(db, async (transaction) => {
-                    const reqDocRef = doc(requisitionsCollection, reqId);
-                    const reqDoc = await transaction.get(reqDocRef);
-                    if (!reqDoc.exists()) throw "Requisição não encontrada!";
+                const reqEntry = allRequisitionsDocs.find(r => r.id === reqId);
+                if (!reqEntry) throw 'Requisição não encontrada!';
 
-                    const { stockLocationId, quantity } = reqDoc.data();
-                    let updateData = { status: newStatus, statusUpdatedAt: serverTimestamp() };
+                const targetCollection = reqEntry.source === 'new' ? requisitionsCollectionSecondary : requisitionsCollectionPrimary;
+                const targetDb = reqEntry.source === 'new' ? secondaryDb : db;
+                const reqDocRef = doc(targetCollection, reqId);
+                const reqDocSnap = await getDoc(reqDocRef);
+                if (!reqDocSnap.exists()) throw 'Requisição não encontrada!';
 
-                    if (newStatus !== 'Entregue' && oldStatus === 'Entregue') {
-                        if (!stockLocationId) throw "Não foi possível reverter a entrega: Localização de origem desconhecida.";
-                        
+                const { stockLocationId, quantity } = reqDocSnap.data();
+                const updateData = { status: newStatus, statusUpdatedAt: serverTimestamp() };
+
+                // Se estiver revertendo uma entrega, devolve estoque no primário
+                if (newStatus !== 'Entregue' && oldStatus === 'Entregue') {
+                    if (!stockLocationId) throw "Não foi possível reverter a entrega: Localização de origem desconhecida.";
+                    await runTransaction(db, async (transaction) => {
                         const locationToUpdateRef = doc(stockLocationsCollection, stockLocationId);
                         const locationDoc = await transaction.get(locationToUpdateRef);
                         if (!locationDoc.exists()) throw "Localização de estoque da entrega anterior não encontrada.";
-
                         const newQuantity = (locationDoc.data().quantity || 0) + quantity;
                         transaction.update(locationToUpdateRef, { quantity: newQuantity });
-                        updateData.stockLocationId = null;
-                    }
-                    
-                    transaction.update(reqDocRef, updateData);
-                });
+                    });
+                    updateData.stockLocationId = null;
+                }
+
+                await updateDoc(reqDocRef, updateData);
                 logMeta('requisition_status_update', {
                     reqId,
                     from: oldStatus,
@@ -2466,30 +2519,38 @@
 
             const locationId = selectedLocationRadio.value;
             const reqId = modalLocationReqId.value;
-            const reqDocRef = doc(requisitionsCollection, reqId);
+            const reqEntry = allRequisitionsDocs.find(r => r.id === reqId);
+            if (!reqEntry) {
+                alert('Requisição não encontrada.');
+                return;
+            }
+
+            const targetCollection = reqEntry.source === 'new' ? requisitionsCollectionSecondary : requisitionsCollectionPrimary;
+            const targetDb = reqEntry.source === 'new' ? secondaryDb : db;
+            const reqDocRef = doc(targetCollection, reqId);
+            const reqDocSnap = await getDoc(reqDocRef);
+            if (!reqDocSnap.exists()) {
+                alert('Requisição não encontrada.');
+                return;
+            }
+
+            const { quantity } = reqDocSnap.data();
             const locationToUpdateRef = doc(stockLocationsCollection, locationId);
 
             try {
                 await runTransaction(db, async (transaction) => {
-                    const reqDoc = await transaction.get(reqDocRef);
-                    if (!reqDoc.exists()) throw "Requisição não encontrada!";
-                    const { quantity } = reqDoc.data();
-
                     const locationDoc = await transaction.get(locationToUpdateRef);
                     if (!locationDoc.exists()) throw "Localização de estoque selecionada não existe mais.";
-                    
                     const currentStock = locationDoc.data().quantity || 0;
                     if (currentStock < quantity) throw `Estoque no local selecionado é insuficiente. Ação cancelada.`;
-
                     const newQuantity = currentStock - quantity;
                     transaction.update(locationToUpdateRef, { quantity: newQuantity });
+                });
 
-                    const updateData = { 
-                        status: 'Entregue', 
-                        statusUpdatedAt: serverTimestamp(), 
-                        stockLocationId: locationId 
-                    };
-                    transaction.update(reqDocRef, updateData);
+                await updateDoc(reqDocRef, { 
+                    status: 'Entregue', 
+                    statusUpdatedAt: serverTimestamp(), 
+                    stockLocationId: locationId 
                 });
                 logMeta('requisition_delivery', {
                     reqId,
