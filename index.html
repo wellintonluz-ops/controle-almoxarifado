@@ -287,6 +287,7 @@
             <a id="gestao-recebimento-btn" href="https://wellintonluz-ops.github.io/gestao-containers/" target="_blank" class="btn-primary font-semibold py-2 px-4 rounded-md shadow-sm hidden">Gestão de recebimento importação</a>
             <button id="login-logout-btn" class="btn-primary font-semibold py-2 px-4 rounded-md shadow-sm">Login</button>
         </div>
+        <div id="firebase-status" class="absolute top-14 right-4 md:top-20 md:right-8 text-xs px-3 py-1 rounded-md bg-blue-100 text-blue-800 hidden">Conectando ao Firebase...</div>
 
         <!-- Abas de Navegação -->
         <div class="border-b border-gray-200 mb-8">
@@ -896,6 +897,7 @@
         const googleProvider = new GoogleAuthProvider();
         
         const loginLogoutBtn = document.getElementById('login-logout-btn');
+        const firebaseStatus = document.getElementById('firebase-status');
         const tabDashboard = document.getElementById('tab-dashboard');
         const tabKanban = document.getElementById('tab-kanban');
         const tabLabels = document.getElementById('tab-labels');
@@ -989,6 +991,26 @@
         let selectedMonthlyYear = new Date().getFullYear();
         let monthlyItemSearchTerm = '';
         let allowSecondary = true;
+
+        function updateFirebaseStatus(message = '', type = 'info', visible = false) {
+            if (!firebaseStatus) return;
+
+            firebaseStatus.classList.remove('bg-blue-100', 'text-blue-800', 'bg-green-100', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'bg-red-100', 'text-red-800');
+            if (!visible) {
+                firebaseStatus.classList.add('hidden');
+                return;
+            }
+
+            firebaseStatus.textContent = message;
+            const typeClasses = {
+                info: ['bg-blue-100', 'text-blue-800'],
+                success: ['bg-green-100', 'text-green-800'],
+                warn: ['bg-yellow-100', 'text-yellow-800'],
+                error: ['bg-red-100', 'text-red-800']
+            };
+            (typeClasses[type] || typeClasses.info).forEach(cls => firebaseStatus.classList.add(cls));
+            firebaseStatus.classList.remove('hidden');
+        }
 
         async function ensureGoogleAuth() {
             if (auth.currentUser) {
@@ -1482,10 +1504,13 @@
                         }
                         [loadingRequisitions, loadingItems, loadingEmployees, loadingStock].forEach(l => l.classList.add('hidden'));
                         updateUIForAuth();
+                        updateFirebaseStatus('Aguardando login no Firebase...', 'warn', true);
                         return false;
                     }
+                    updateFirebaseStatus('Conectando ao Firebase com Google...', 'info', true);
                     await ensureGoogleAuth();
                 }
+                updateFirebaseStatus('Carregando dados...', 'info', true);
                 
                 const basePath = `/artifacts/${appId}/public/data`;
                 const metaBasePath = `/artifacts/${secondaryAppId}/public/meta`;
@@ -1528,12 +1553,15 @@
                 if (isLoggedIn) {
                     startRealtimeListeners();
                 }
+                updateFirebaseStatus('Conectado ao Firebase', 'success', true);
+                setTimeout(() => updateFirebaseStatus('', 'info', false), 1500);
                 return true;
             } catch (error) {
                 console.error("Erro na autenticação ou Firestore:", error);
                 isFirestoreReady = false;
                 updateUIForAuth();
                 [loadingRequisitions, loadingItems, loadingEmployees, loadingStock].forEach(l => l.classList.add('hidden'));
+                updateFirebaseStatus('Erro de conexao com Firebase. Clique em Login e tente novamente.', 'error', true);
                 return false;
             }
         }
@@ -2871,7 +2899,9 @@
                 isLoggedIn = false;
                 sessionStorage.removeItem('isUserLoggedIn'); // Remove o estado de login
                 updateUIForAuth();
+                updateFirebaseStatus('Aguardando login no Firebase...', 'warn', true);
             } else {
+                updateFirebaseStatus('Conectando ao Firebase...', 'info', true);
                 if (!auth.currentUser) {
                     const firebaseReady = await setupAuthAndFirestore(true);
                     if (!firebaseReady) {
@@ -3527,20 +3557,29 @@
         catalogShowInactive.addEventListener('change', renderCatalog);
 
         function bootstrapFirebaseAuth() {
-            let initialized = false;
+            let isHandlingAuthState = false;
+            let firstAuthEventHandled = false;
 
-            onAuthStateChanged(auth, async () => {
-                if (initialized) return;
-                initialized = true;
+            updateFirebaseStatus('Conectando ao Firebase...', 'info', true);
 
-                // Se havia sessão admin salva, força login Google no boot.
-                if (shouldForceGoogleAtStartup) {
-                    await setupAuthAndFirestore(true);
-                    return;
+            onAuthStateChanged(auth, async (user) => {
+                if (isHandlingAuthState) return;
+                isHandlingAuthState = true;
+
+                try {
+                    if (user) {
+                        await setupAuthAndFirestore(false);
+                    } else {
+                        await setupAuthAndFirestore(false);
+
+                        if (shouldForceGoogleAtStartup && !firstAuthEventHandled) {
+                            updateFirebaseStatus('Sessao expirada. Clique em Login para reconectar.', 'warn', true);
+                        }
+                    }
+                } finally {
+                    firstAuthEventHandled = true;
+                    isHandlingAuthState = false;
                 }
-
-                // Sem sessão admin, inicializa silenciosamente se já houver usuário Google persistido.
-                await setupAuthAndFirestore(false);
             });
         }
 
