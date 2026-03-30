@@ -391,7 +391,7 @@
                     </div>
                     <div class="flex items-center gap-2">
                         <button id="export-requisitions-btn" class="btn-primary font-semibold py-2 px-4 rounded-md shadow-sm">Exportar</button>
-                        <div id="loading-requisitions" class="loader"></div>
+                        <div id="loading-requisitions" class="loader hidden"></div>
                     </div>
                 </div>
                 <div class="flex flex-col md:flex-row md:space-x-4 mb-4">
@@ -1473,6 +1473,7 @@
                 if (!auth.currentUser) {
                     if (!forceGoogleLogin) {
                         isFirestoreReady = false;
+                        [loadingRequisitions, loadingItems, loadingEmployees, loadingStock].forEach(l => l.classList.add('hidden'));
                         updateUIForAuth();
                         return false;
                     }
