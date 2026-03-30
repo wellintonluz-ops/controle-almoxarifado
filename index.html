@@ -853,7 +853,7 @@
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, signInWithCredential } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy, limit, setDoc, increment, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
@@ -892,6 +892,7 @@
         const secondaryDb = getFirestore(secondaryApp);
         const secondaryStorage = getStorage(secondaryApp);
         const secondaryAuth = getAuth(secondaryApp);
+        const googleProvider = new GoogleAuthProvider();
         
         const loginLogoutBtn = document.getElementById('login-logout-btn');
         const tabDashboard = document.getElementById('tab-dashboard');
@@ -988,6 +989,28 @@
         let monthlyItemSearchTerm = '';
         let allowSecondary = true;
 
+        async function ensureGoogleAuth() {
+            if (auth.currentUser) {
+                return true;
+            }
+
+            const result = await signInWithPopup(auth, googleProvider);
+            const credential = GoogleAuthProvider.credentialFromResult(result);
+
+            if (!credential) {
+                throw new Error('Nao foi possivel obter credencial Google para autenticar no Firebase.');
+            }
+
+            try {
+                await signInWithCredential(secondaryAuth, credential);
+            } catch (secAuthErr) {
+                console.warn('Login Google no projeto secundario falhou:', secAuthErr);
+                allowSecondary = false;
+            }
+
+            return true;
+        }
+
         function getReadCollection(primary, secondary) {
             return (allowSecondary && secondary) ? secondary : primary;
         }
@@ -1018,7 +1041,8 @@
                 data.requester,
                 data.itemDescription,
                 data.item,
-                data.itemCode
+                data.itemCode,
+                data.justification
             ].map(normalizeText).join(' ');
             return haystack.includes(normalizedTerm);
         }
@@ -1444,15 +1468,15 @@
         }
         
 
-        async function setupAuthAndFirestore() {
+        async function setupAuthAndFirestore(forceGoogleLogin = false) {
             try {
-                await signInAnonymously(auth);
-                // Autentica também no projeto secundário para permitir gravações de metadados/contadores
-                try {
-                    await signInAnonymously(secondaryAuth);
-                } catch (secAuthErr) {
-                    console.warn('Login anonimo no projeto secundario falhou:', secAuthErr);
-                    allowSecondary = false;
+                if (!auth.currentUser) {
+                    if (!forceGoogleLogin) {
+                        isFirestoreReady = false;
+                        updateUIForAuth();
+                        return false;
+                    }
+                    await ensureGoogleAuth();
                 }
                 
                 const basePath = `/artifacts/${appId}/public/data`;
@@ -1496,11 +1520,13 @@
                 if (isLoggedIn) {
                     startRealtimeListeners();
                 }
+                return true;
             } catch (error) {
                 console.error("Erro na autenticação ou Firestore:", error);
                 isFirestoreReady = false;
                 updateUIForAuth();
                 [loadingRequisitions, loadingItems, loadingEmployees, loadingStock].forEach(l => l.classList.add('hidden'));
+                return false;
             }
         }
         
@@ -2831,13 +2857,20 @@
              );
         }
 
-        loginLogoutBtn.addEventListener('click', () => {
+        loginLogoutBtn.addEventListener('click', async () => {
             if (isLoggedIn) {
                 unsubscribeAll();
                 isLoggedIn = false;
                 sessionStorage.removeItem('isUserLoggedIn'); // Remove o estado de login
                 updateUIForAuth();
             } else {
+                if (!isFirestoreReady) {
+                    const firebaseReady = await setupAuthAndFirestore(true);
+                    if (!firebaseReady) {
+                        alert('Nao foi possivel autenticar com Google no Firebase. Verifique se o provedor Google esta habilitado e se este dominio esta autorizado.');
+                        return;
+                    }
+                }
                 loginError.classList.add('hidden');
                 loginForm.reset();
                 loginModal.classList.remove('hidden');
@@ -3479,7 +3512,7 @@
         
         catalogShowInactive.addEventListener('change', renderCatalog);
 
-        setupAuthAndFirestore();
+        setupAuthAndFirestore(false);
     </script>
 </body>
 </html>
