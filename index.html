@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Controle de Almoxarifado e Estoque</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%232563eb'/%3E%3Cpath d='M16 22h32v20H16z' fill='white'/%3E%3Cpath d='M22 28h20v2H22zm0 5h20v2H22zm0 5h12v2H22z' fill='%232563eb'/%3E%3C/svg%3E">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -853,7 +854,7 @@
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInWithPopup, GoogleAuthProvider, signInWithCredential } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, signInWithCredential, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy, limit, setDoc, increment, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
@@ -1466,6 +1467,7 @@
         if (sessionStorage.getItem('isUserLoggedIn') === 'true') {
             isLoggedIn = true;
         }
+        const shouldForceGoogleAtStartup = isLoggedIn;
         
 
         async function setupAuthAndFirestore(forceGoogleLogin = false) {
@@ -1473,6 +1475,11 @@
                 if (!auth.currentUser) {
                     if (!forceGoogleLogin) {
                         isFirestoreReady = false;
+                        // Evita estado inconsistente: admin logado sem sessão Firebase válida
+                        if (isLoggedIn) {
+                            isLoggedIn = false;
+                            sessionStorage.removeItem('isUserLoggedIn');
+                        }
                         [loadingRequisitions, loadingItems, loadingEmployees, loadingStock].forEach(l => l.classList.add('hidden'));
                         updateUIForAuth();
                         return false;
@@ -2865,10 +2872,16 @@
                 sessionStorage.removeItem('isUserLoggedIn'); // Remove o estado de login
                 updateUIForAuth();
             } else {
-                if (!isFirestoreReady) {
+                if (!auth.currentUser) {
                     const firebaseReady = await setupAuthAndFirestore(true);
                     if (!firebaseReady) {
                         alert('Nao foi possivel autenticar com Google no Firebase. Verifique se o provedor Google esta habilitado e se este dominio esta autorizado.');
+                        return;
+                    }
+                } else if (!isFirestoreReady) {
+                    const firebaseReady = await setupAuthAndFirestore(false);
+                    if (!firebaseReady) {
+                        alert('Nao foi possivel inicializar o Firestore com o usuario Google atual.');
                         return;
                     }
                 }
@@ -3513,7 +3526,25 @@
         
         catalogShowInactive.addEventListener('change', renderCatalog);
 
-        setupAuthAndFirestore(false);
+        function bootstrapFirebaseAuth() {
+            let initialized = false;
+
+            onAuthStateChanged(auth, async () => {
+                if (initialized) return;
+                initialized = true;
+
+                // Se havia sessão admin salva, força login Google no boot.
+                if (shouldForceGoogleAtStartup) {
+                    await setupAuthAndFirestore(true);
+                    return;
+                }
+
+                // Sem sessão admin, inicializa silenciosamente se já houver usuário Google persistido.
+                await setupAuthAndFirestore(false);
+            });
+        }
+
+        bootstrapFirebaseAuth();
     </script>
 </body>
 </html>
