@@ -855,7 +855,7 @@
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInWithPopup, GoogleAuthProvider, signInWithCredential, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signInWithCredential, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy, limit, setDoc, increment, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
@@ -895,6 +895,9 @@
         const secondaryStorage = getStorage(secondaryApp);
         const secondaryAuth = getAuth(secondaryApp);
         const googleProvider = new GoogleAuthProvider();
+        googleProvider.setCustomParameters({ prompt: 'select_account' });
+        const FIREBASE_SILENT_GOOGLE_ATTEMPT_KEY = 'firebaseSilentGoogleAttempt';
+        const FIREBASE_REDIRECT_MODE_KEY = 'firebaseRedirectMode';
         
         const loginLogoutBtn = document.getElementById('login-logout-btn');
         const firebaseStatus = document.getElementById('firebase-status');
@@ -991,6 +994,7 @@
         let selectedMonthlyYear = new Date().getFullYear();
         let monthlyItemSearchTerm = '';
         let allowSecondary = true;
+        let hasProcessedRedirectResult = false;
 
         function updateFirebaseStatus(message = '', type = 'info', visible = false) {
             if (!firebaseStatus) return;
@@ -1027,17 +1031,44 @@
             updateFirebaseStatus('Usuario autenticado sem permissao nas regras do Firestore.', 'error', true);
         }
 
-        async function ensureGoogleAuth() {
-            if (auth.currentUser) {
-                return true;
+        function getGoogleAuthErrorMessage(error) {
+            const code = error?.code || '';
+
+            if (code === 'auth/unauthorized-domain') {
+                return `O dominio ${window.location.hostname} nao esta autorizado no Firebase Authentication.`;
+            }
+            if (code === 'auth/operation-not-allowed') {
+                return 'O provedor Google nao esta habilitado no Firebase Authentication.';
+            }
+            if (code === 'auth/popup-blocked') {
+                return 'O navegador bloqueou a janela de login Google para este site.';
+            }
+            if (code === 'auth/popup-closed-by-user') {
+                return 'A janela de login Google foi fechada antes da conclusao.';
+            }
+            if (code === 'auth/cancelled-popup-request') {
+                return 'Ja existe uma solicitacao de login Google em andamento.';
+            }
+            if (code === 'auth/network-request-failed') {
+                return 'Falha de rede ao autenticar com Google.';
             }
 
-            const result = await signInWithPopup(auth, googleProvider);
-            const credential = GoogleAuthProvider.credentialFromResult(result);
+            return error?.message || 'Nao foi possivel autenticar com Google no Firebase.';
+        }
 
-            if (!credential) {
-                throw new Error('Nao foi possivel obter credencial Google para autenticar no Firebase.');
-            }
+        function buildGoogleProvider(prompt = 'select_account') {
+            const provider = new GoogleAuthProvider();
+            provider.setCustomParameters({ prompt });
+            return provider;
+        }
+
+        function clearSilentGoogleAttempt() {
+            sessionStorage.removeItem(FIREBASE_SILENT_GOOGLE_ATTEMPT_KEY);
+            sessionStorage.removeItem(FIREBASE_REDIRECT_MODE_KEY);
+        }
+
+        async function syncSecondaryGoogleAuth(credential) {
+            if (!credential) return;
 
             try {
                 await signInWithCredential(secondaryAuth, credential);
@@ -1045,8 +1076,77 @@
                 console.warn('Login Google no projeto secundario falhou:', secAuthErr);
                 allowSecondary = false;
             }
+        }
 
+        async function processRedirectAuthResult() {
+            if (hasProcessedRedirectResult) return false;
+            hasProcessedRedirectResult = true;
+
+            try {
+                const result = await getRedirectResult(auth);
+
+                if (!result) {
+                    if (sessionStorage.getItem(FIREBASE_SILENT_GOOGLE_ATTEMPT_KEY) === 'pending') {
+                        sessionStorage.setItem(FIREBASE_SILENT_GOOGLE_ATTEMPT_KEY, 'failed');
+                        sessionStorage.removeItem(FIREBASE_REDIRECT_MODE_KEY);
+                    }
+                    return false;
+                }
+
+                clearSilentGoogleAttempt();
+                const credential = GoogleAuthProvider.credentialFromResult(result);
+                await syncSecondaryGoogleAuth(credential);
+                return true;
+            } catch (error) {
+                console.error('Erro ao concluir autenticacao Google por redirect:', error);
+
+                if (sessionStorage.getItem(FIREBASE_REDIRECT_MODE_KEY) === 'silent') {
+                    sessionStorage.setItem(FIREBASE_SILENT_GOOGLE_ATTEMPT_KEY, 'failed');
+                }
+                sessionStorage.removeItem(FIREBASE_REDIRECT_MODE_KEY);
+                updateFirebaseStatus(getGoogleAuthErrorMessage(error), 'warn', true);
+                return false;
+            }
+        }
+
+        async function trySilentGoogleAuth() {
+            if (auth.currentUser) {
+                return false;
+            }
+
+            const attemptState = sessionStorage.getItem(FIREBASE_SILENT_GOOGLE_ATTEMPT_KEY);
+            if (attemptState === 'pending' || attemptState === 'failed') {
+                return false;
+            }
+
+            sessionStorage.setItem(FIREBASE_SILENT_GOOGLE_ATTEMPT_KEY, 'pending');
+            sessionStorage.setItem(FIREBASE_REDIRECT_MODE_KEY, 'silent');
+            updateFirebaseStatus('Reconhecendo a conta Google do navegador...', 'info', true);
+            await signInWithRedirect(auth, buildGoogleProvider('none'));
             return true;
+        }
+
+        async function ensureGoogleAuth() {
+            if (auth.currentUser) {
+                return true;
+            }
+
+            try {
+                const result = await signInWithPopup(auth, googleProvider);
+                const credential = GoogleAuthProvider.credentialFromResult(result);
+
+                if (!credential) {
+                    throw new Error('Nao foi possivel obter credencial Google para autenticar no Firebase.');
+                }
+
+                clearSilentGoogleAttempt();
+                await syncSecondaryGoogleAuth(credential);
+
+                return true;
+            } catch (error) {
+                error.userMessage = getGoogleAuthErrorMessage(error);
+                throw error;
+            }
         }
 
         function getReadCollection(primary, secondary) {
@@ -1663,7 +1763,7 @@
                 isFirestoreReady = false;
                 updateUIForAuth();
                 [loadingRequisitions, loadingItems, loadingEmployees, loadingStock].forEach(l => l.classList.add('hidden'));
-                updateFirebaseStatus('Erro de conexao com Firebase. Clique em Login e tente novamente.', 'error', true);
+                updateFirebaseStatus(error?.userMessage || 'Erro de conexao com Firebase. Clique em Login e tente novamente.', 'error', true);
                 return false;
             }
         }
@@ -3078,7 +3178,7 @@
                 if (!auth.currentUser) {
                     const firebaseReady = await setupAuthAndFirestore(true);
                     if (!firebaseReady) {
-                        alert('Nao foi possivel autenticar com Google no Firebase. Verifique se o provedor Google esta habilitado e se este dominio esta autorizado.');
+                        alert(firebaseStatus?.textContent || 'Nao foi possivel autenticar com Google no Firebase.');
                         return;
                     }
                     return;
@@ -3732,11 +3832,12 @@
         
         catalogShowInactive.addEventListener('change', renderCatalog);
 
-        function bootstrapFirebaseAuth() {
+        async function bootstrapFirebaseAuth() {
             let isHandlingAuthState = false;
             let firstAuthEventHandled = false;
 
             updateFirebaseStatus('Verificando sessao do Firebase...', 'info', true);
+            await processRedirectAuthResult();
 
             onAuthStateChanged(auth, async (user) => {
                 if (isHandlingAuthState) return;
@@ -3744,11 +3845,19 @@
 
                 try {
                     if (user) {
+                        clearSilentGoogleAttempt();
                         await setupAuthAndFirestore(false);
                     } else {
                         isFirestoreReady = false;
                         unsubscribeAll();
                         updateUIForAuth();
+
+                        if (!firstAuthEventHandled) {
+                            const startedSilentAuth = await trySilentGoogleAuth();
+                            if (startedSilentAuth) {
+                                return;
+                            }
+                        }
 
                         if (shouldForceGoogleAtStartup && !firstAuthEventHandled) {
                             updateFirebaseStatus('Sessao expirada. Clique em Conectar para autenticar novamente.', 'warn', true);
