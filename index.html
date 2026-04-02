@@ -855,7 +855,7 @@
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signInWithCredential, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy, limit, setDoc, increment, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
@@ -894,6 +894,15 @@
         const secondaryDb = getFirestore(secondaryApp);
         const secondaryStorage = getStorage(secondaryApp);
         const secondaryAuth = getAuth(secondaryApp);
+        const secondaryAuthInitPromise = new Promise(resolve => {
+            const unsubscribe = onAuthStateChanged(secondaryAuth, user => {
+                unsubscribe();
+                resolve(user);
+            }, error => {
+                console.warn('Falha ao inicializar sessao do Firebase secundario:', error);
+                resolve(null);
+            });
+        });
         const googleProvider = new GoogleAuthProvider();
         googleProvider.setCustomParameters({ prompt: 'select_account' });
         const FIREBASE_SILENT_GOOGLE_ATTEMPT_KEY = 'firebaseSilentGoogleAttempt';
@@ -1056,9 +1065,13 @@
             return error?.message || 'Nao foi possivel autenticar com Google no Firebase.';
         }
 
-        function buildGoogleProvider(prompt = 'select_account') {
+        function buildGoogleProvider(prompt = 'select_account', loginHint = '') {
             const provider = new GoogleAuthProvider();
-            provider.setCustomParameters({ prompt });
+            const params = { prompt };
+            if (loginHint) {
+                params.login_hint = loginHint;
+            }
+            provider.setCustomParameters(params);
             return provider;
         }
 
@@ -1067,14 +1080,26 @@
             sessionStorage.removeItem(FIREBASE_REDIRECT_MODE_KEY);
         }
 
-        async function syncSecondaryGoogleAuth(credential) {
-            if (!credential) return;
+        async function ensureSecondaryGoogleAuth(interactive = false) {
+            await secondaryAuthInitPromise;
+
+            if (secondaryAuth.currentUser) {
+                return true;
+            }
+
+            if (!interactive || !auth.currentUser) {
+                return false;
+            }
 
             try {
-                await signInWithCredential(secondaryAuth, credential);
+                const loginHint = auth.currentUser.email || '';
+                await signInWithPopup(secondaryAuth, buildGoogleProvider('select_account', loginHint));
+                return true;
             } catch (secAuthErr) {
                 console.warn('Login Google no projeto secundario falhou:', secAuthErr);
+                updateFirebaseStatus(`Historico recente indisponivel no projeto secundario. ${getGoogleAuthErrorMessage(secAuthErr)}`, 'warn', true);
                 allowSecondary = false;
+                return false;
             }
         }
 
@@ -1094,8 +1119,6 @@
                 }
 
                 clearSilentGoogleAttempt();
-                const credential = GoogleAuthProvider.credentialFromResult(result);
-                await syncSecondaryGoogleAuth(credential);
                 return true;
             } catch (error) {
                 console.error('Erro ao concluir autenticacao Google por redirect:', error);
@@ -1133,14 +1156,12 @@
 
             try {
                 const result = await signInWithPopup(auth, googleProvider);
-                const credential = GoogleAuthProvider.credentialFromResult(result);
-
-                if (!credential) {
-                    throw new Error('Nao foi possivel obter credencial Google para autenticar no Firebase.');
+                if (!result?.user) {
+                    throw new Error('Nao foi possivel obter usuario Google para autenticar no Firebase.');
                 }
 
                 clearSilentGoogleAttempt();
-                await syncSecondaryGoogleAuth(credential);
+                await ensureSecondaryGoogleAuth(true);
 
                 return true;
             } catch (error) {
@@ -1742,12 +1763,22 @@
 
                 // Testa acesso à coleção de novas requisições; se falhar, desabilita uso do secundário
                 allowSecondary = true;
+                await secondaryAuthInitPromise;
+                if (!secondaryAuth.currentUser) {
+                    allowSecondary = false;
+                }
                 try {
-                    await getDocs(query(requisitionsCollectionSecondary, limit(1)));
+                    if (allowSecondary) {
+                        await getDocs(query(requisitionsCollectionSecondary, limit(1)));
+                    }
                 } catch (err) {
                     console.warn('Sem permissão no projeto secundario, usando apenas projeto 1:', err);
                     updatePermissionStatus(err);
                     allowSecondary = false;
+                }
+
+                if (!allowSecondary) {
+                    console.warn('Projeto secundario sem sessao valida. Historico recente pode nao aparecer neste navegador.');
                 }
 
                 isFirestoreReady = true;
