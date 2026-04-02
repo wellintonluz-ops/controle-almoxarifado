@@ -36,13 +36,13 @@
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
             width: 90%; max-width: 500px;
         }
-        .btn-primary { background-color: #2563eb; color: white; transition: background-color: 0.3s; }
+        .btn-primary { background-color: #2563eb; color: white; transition: background-color 0.3s; }
         .btn-primary:hover { background-color: #1d4ed8; }
         .btn-primary:disabled { background-color: #9ca3af; cursor: not-allowed; }
-        .btn-secondary { background-color: #6b7280; color: white; transition: background-color: 0.3s; }
+        .btn-secondary { background-color: #6b7280; color: white; transition: background-color 0.3s; }
         .btn-secondary:hover { background-color: #4b5563; }
         .btn-secondary:disabled { background-color: #9ca3af; cursor: not-allowed; }
-        .btn-danger { background-color: #dc2626; color: white; transition: background-color: 0.3s; }
+        .btn-danger { background-color: #dc2626; color: white; transition: background-color 0.3s; }
         .btn-danger:hover { background-color: #b91c1c; }
         .loader {
             border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%;
@@ -970,7 +970,7 @@
 
         let requisitionsCollectionPrimary, requisitionsCollectionSecondary, itemsCollection, employeesCollection, stockLocationsCollection, kanbanEquipmentsCollection, metaLogsCollection, metaCountersCollection;
         let itemsReadCollection, employeesReadCollection, stockLocationsReadCollection, kanbanEquipmentsReadCollection;
-        let unsubRequisitions = null, unsubItems = null, unsubEmployees = null, unsubStock = null, unsubKanban = null;
+        let unsubRequisitionsPrimary = null, unsubRequisitionsSecondary = null, unsubItems = null, unsubEmployees = null, unsubStock = null, unsubKanban = null;
         let isLoggedIn = false;
         let isFirestoreReady = false;
         let oldRequisitionsDocs = [], newRequisitionsDocs = [], allRequisitionsDocs = [], allItemsDocs = [], allEmployeesDocs = [], allStockLocationsDocs = [], allKanbanEquipmentsDocs = [];
@@ -1038,9 +1038,97 @@
             return (allowSecondary && secondary) ? secondary : primary;
         }
 
+        function getTimestampDate(value) {
+            if (!value) return null;
+
+            if (value instanceof Date) {
+                return Number.isNaN(value.getTime()) ? null : value;
+            }
+
+            if (typeof value.toDate === 'function') {
+                const convertedDate = value.toDate();
+                return convertedDate instanceof Date && !Number.isNaN(convertedDate.getTime()) ? convertedDate : null;
+            }
+
+            const parsedDate = new Date(value);
+            return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+        }
+
+        function getRequisitionCreatedDate(data) {
+            return getTimestampDate(data.createdAt) || getTimestampDate(data.createdAtClient);
+        }
+
+        function getRequisitionUpdatedDate(data) {
+            return getTimestampDate(data.statusUpdatedAt);
+        }
+
+        function getRequisitionSortTime(data) {
+            return (getRequisitionUpdatedDate(data) || getRequisitionCreatedDate(data) || new Date(0)).getTime();
+        }
+
+        function wrapRequisitionDoc(snap, source) {
+            return { id: snap.id, data: () => snap.data(), source };
+        }
+
+        function syncRequisitionState() {
+            allRequisitionsDocs = [...newRequisitionsDocs, ...oldRequisitionsDocs].sort((a, b) => getRequisitionSortTime(b.data()) - getRequisitionSortTime(a.data()));
+        }
+
+        function refreshRequisitionViews() {
+            syncRequisitionState();
+            renderRequisitions();
+            renderMonthlyConsumptionChart();
+            renderMonthlyRequests();
+            updateAverageRequestTime();
+        }
+
+        function getRequisitionWriteTarget() {
+            if (allowSecondary && requisitionsCollectionSecondary) {
+                return { collection: requisitionsCollectionSecondary, source: 'new' };
+            }
+
+            return { collection: requisitionsCollectionPrimary, source: 'old' };
+        }
+
+        async function saveRequisitionWithFallback(requisitionData) {
+            const preferredTarget = getRequisitionWriteTarget();
+            const targets = preferredTarget.source === 'new'
+                ? [preferredTarget, { collection: requisitionsCollectionPrimary, source: 'old' }]
+                : [preferredTarget];
+
+            let lastError = null;
+
+            for (const target of targets) {
+                if (!target.collection) continue;
+
+                try {
+                    const ref = await addDoc(target.collection, requisitionData);
+                    return { ref, source: target.source };
+                } catch (error) {
+                    lastError = error;
+
+                    if (target.source === 'new') {
+                        console.warn('Falha ao gravar no projeto secundario. Tentando o principal:', error);
+                        allowSecondary = false;
+                        if (unsubRequisitionsSecondary) {
+                            unsubRequisitionsSecondary();
+                            unsubRequisitionsSecondary = null;
+                        }
+                        newRequisitionsDocs = [];
+                        refreshRequisitionViews();
+                        continue;
+                    }
+
+                    console.error('Falha ao gravar requisicao:', error);
+                }
+            }
+
+            throw lastError || new Error('Nenhuma colecao de requisicoes disponivel.');
+        }
+
         function getRequestBaseDate(data) {
-            const updated = data.statusUpdatedAt?.toDate();
-            const created = data.createdAt?.toDate();
+            const updated = getRequisitionUpdatedDate(data);
+            const created = getRequisitionCreatedDate(data);
             return updated || created || null;
         }
 
@@ -1079,8 +1167,8 @@
 
             recentDocs.forEach(doc => {
                 const data = doc.data();
-                const created = data.createdAt?.toDate();
-                const updated = data.statusUpdatedAt?.toDate();
+                const created = getRequisitionCreatedDate(data);
+                const updated = getRequisitionUpdatedDate(data);
                 if (!created || !updated) return;
                 const diff = updated - created;
                 if (diff >= 0) {
@@ -1462,7 +1550,7 @@
                     const rows = filteredDocs.map(doc => {
                         const data = doc.data();
                         return [
-                            data.createdAt?.toDate().toLocaleDateString('pt-BR') || '',
+                            getRequisitionCreatedDate(data)?.toLocaleDateString('pt-BR') || '',
                             data.requester || '',
                             (data.itemCode ? `[${data.itemCode}] - ` : '') + (data.itemDescription || data.item || ''),
                             data.quantity || '',
@@ -1494,37 +1582,31 @@
 
         async function setupAuthAndFirestore(forceGoogleLogin = false) {
             try {
-                if (!auth.currentUser) {
-                    if (!forceGoogleLogin) {
-                        isFirestoreReady = false;
-                        // Evita estado inconsistente: admin logado sem sessão Firebase válida
-                        if (isLoggedIn) {
-                            isLoggedIn = false;
-                            sessionStorage.removeItem('isUserLoggedIn');
-                        }
-                        [loadingRequisitions, loadingItems, loadingEmployees, loadingStock].forEach(l => l.classList.add('hidden'));
-                        updateUIForAuth();
-                        updateFirebaseStatus('Aguardando login no Firebase...', 'warn', true);
-                        return false;
-                    }
+                if (!auth.currentUser && forceGoogleLogin) {
                     updateFirebaseStatus('Conectando ao Firebase com Google...', 'info', true);
                     await ensureGoogleAuth();
                 }
+
+                if (!auth.currentUser && isLoggedIn && !forceGoogleLogin) {
+                    isLoggedIn = false;
+                    sessionStorage.removeItem('isUserLoggedIn');
+                }
+
                 updateFirebaseStatus('Carregando dados...', 'info', true);
                 
                 const basePath = `/artifacts/${appId}/public/data`;
                 const metaBasePath = `/artifacts/${secondaryAppId}/public/meta`;
-                                const secondaryBasePath = `/artifacts/${secondaryAppId}/public/data`;
+                const secondaryBasePath = `/artifacts/${secondaryAppId}/public/data`;
 
-                                // Escrita (DB principal)
-                                requisitionsCollectionPrimary = collection(db, `${basePath}/requisitions`);
+                // Escrita (DB principal)
+                requisitionsCollectionPrimary = collection(db, `${basePath}/requisitions`);
                 itemsCollection = collection(db, `${basePath}/items`);
                 employeesCollection = collection(db, `${basePath}/employees`);
                 stockLocationsCollection = collection(db, `${basePath}/stockLocations`);
                 kanbanEquipmentsCollection = collection(db, `${basePath}/kanbanEquipments`);
 
-                                // Escrita/Leitura de novas requisicoes (DB secundário)
-                                requisitionsCollectionSecondary = collection(secondaryDb, `${secondaryBasePath}/requisitions`);
+                // Escrita/Leitura de novas requisicoes (DB secundario)
+                requisitionsCollectionSecondary = collection(secondaryDb, `${secondaryBasePath}/requisitions`);
 
                 // Leitura padrão (usar primário; secundário só quando tivermos replicação)
                 itemsReadCollection = itemsCollection;
@@ -1536,24 +1618,20 @@
                 metaCountersCollection = collection(secondaryDb, `${metaBasePath}/counters`);
 
                 // Testa acesso à coleção de novas requisições; se falhar, desabilita uso do secundário
-                if (allowSecondary) {
-                    try {
-                        await getDocs(query(requisitionsCollectionSecondary, limit(1)));
-                        allowSecondary = true;
-                    } catch (err) {
-                        console.warn('Sem permissão no projeto secundário, usando apenas projeto 1:', err);
-                        allowSecondary = false;
-                    }
+                allowSecondary = true;
+                try {
+                    await getDocs(query(requisitionsCollectionSecondary, limit(1)));
+                } catch (err) {
+                    console.warn('Sem permissão no projeto secundario, usando apenas projeto 1:', err);
+                    allowSecondary = false;
                 }
 
                 isFirestoreReady = true;
 
                 await fetchInitialData();
                 updateUIForAuth();
-                if (isLoggedIn) {
-                    startRealtimeListeners();
-                }
-                updateFirebaseStatus('Conectado ao Firebase', 'success', true);
+                startRealtimeListeners();
+                updateFirebaseStatus(auth.currentUser ? 'Conectado ao Firebase' : 'Dados sincronizados', 'success', true);
                 setTimeout(() => updateFirebaseStatus('', 'info', false), 1500);
                 return true;
             } catch (error) {
@@ -1613,12 +1691,12 @@
                 loadingItems.classList.remove('hidden');
                 loadingStock.classList.remove('hidden');
 
-                const reqOldSnapPromise = getDocs(query(requisitionsCollectionPrimary, orderBy('createdAt', 'desc'), limit(500)));
+                const reqOldSnapPromise = getDocs(requisitionsCollectionPrimary);
                 const reqNewSnapPromise = allowSecondary
-                    ? getDocs(query(requisitionsCollectionSecondary, orderBy('createdAt', 'desc'), limit(500)))
+                    ? getDocs(requisitionsCollectionSecondary)
                     : Promise.resolve({ docs: [] });
 
-                const [reqOldSnap, reqNewSnap, empSnap, itemSnap, stockSnap, kanbanSnap] = await Promise.all([
+                const [reqOldResult, reqNewResult, empResult, itemResult, stockResult, kanbanResult] = await Promise.allSettled([
                     reqOldSnapPromise,
                     reqNewSnapPromise,
                     getDocs(getReadCollection(employeesCollection, employeesReadCollection)),
@@ -1627,19 +1705,28 @@
                     getDocs(getReadCollection(kanbanEquipmentsCollection, kanbanEquipmentsReadCollection))
                 ]);
 
-                const wrapDoc = (snap, source) => ({ id: snap.id, data: () => snap.data(), source });
-                oldRequisitionsDocs = reqOldSnap.docs.map(d => wrapDoc(d, 'old'));
-                newRequisitionsDocs = reqNewSnap.docs.map(d => wrapDoc(d, 'new'));
-                allRequisitionsDocs = [...newRequisitionsDocs, ...oldRequisitionsDocs].sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
-                allEmployeesDocs = empSnap.docs.sort((a, b) => a.data().name.localeCompare(b.data().name));
-                allItemsDocs = itemSnap.docs.sort((a, b) => a.data().description.localeCompare(b.data().description));
-                allStockLocationsDocs = stockSnap.docs.sort((a, b) => a.data().address.localeCompare(b.data().address));
-                allKanbanEquipmentsDocs = kanbanSnap.docs;
+                const getDocsFromResult = (result, label, onError) => {
+                    if (result.status === 'fulfilled') {
+                        return result.value.docs;
+                    }
 
-                renderRequisitions();
-                renderMonthlyConsumptionChart();
-                renderMonthlyRequests();
-                updateAverageRequestTime();
+                    console.warn(`Erro ao carregar ${label}:`, result.reason);
+                    if (typeof onError === 'function') {
+                        onError(result.reason);
+                    }
+                    return [];
+                };
+
+                oldRequisitionsDocs = getDocsFromResult(reqOldResult, 'requisicoes do projeto principal').map(d => wrapRequisitionDoc(d, 'old'));
+                newRequisitionsDocs = getDocsFromResult(reqNewResult, 'requisicoes do projeto secundario', () => {
+                    allowSecondary = false;
+                }).map(d => wrapRequisitionDoc(d, 'new'));
+                allEmployeesDocs = getDocsFromResult(empResult, 'funcionarios').sort((a, b) => a.data().name.localeCompare(b.data().name));
+                allItemsDocs = getDocsFromResult(itemResult, 'itens').sort((a, b) => a.data().description.localeCompare(b.data().description));
+                allStockLocationsDocs = getDocsFromResult(stockResult, 'estoque').sort((a, b) => a.data().address.localeCompare(b.data().address));
+                allKanbanEquipmentsDocs = getDocsFromResult(kanbanResult, 'equipamentos kanban');
+
+                refreshRequisitionViews();
                 renderEmployees();
                 renderItems();
                 renderStock();
@@ -1656,24 +1743,35 @@
         function startRealtimeListeners() {
             if (!isFirestoreReady) return;
 
-            if (!unsubRequisitions && allowSecondary) {
+            if (!unsubRequisitionsPrimary) {
                 loadingRequisitions.classList.remove('hidden');
-                try {
-                    unsubRequisitions = onSnapshot(query(requisitionsCollectionSecondary, orderBy('createdAt', 'desc'), limit(500)), s => {
-                        const wrapDoc = (snap, source) => ({ id: snap.id, data: () => snap.data(), source });
-                        newRequisitionsDocs = s.docs.map(d => wrapDoc(d, 'new'));
-                        allRequisitionsDocs = [...newRequisitionsDocs, ...oldRequisitionsDocs].sort((a, b) => (b.data().createdAt?.toDate() || 0) - (a.data().createdAt?.toDate() || 0));
-                        renderRequisitions();
-                        renderMonthlyConsumptionChart();
-                        renderMonthlyRequests();
-                        updateAverageRequestTime();
-                        loadingRequisitions.classList.add('hidden');
-                    });
-                } catch (err) {
-                    console.warn('Snapshot secundário indisponível, mantendo somente histórico:', err);
-                    allowSecondary = false;
+                unsubRequisitionsPrimary = onSnapshot(requisitionsCollectionPrimary, s => {
+                    oldRequisitionsDocs = s.docs.map(d => wrapRequisitionDoc(d, 'old'));
+                    refreshRequisitionViews();
                     loadingRequisitions.classList.add('hidden');
-                }
+                }, err => {
+                    console.warn('Snapshot do projeto principal indisponivel:', err);
+                    loadingRequisitions.classList.add('hidden');
+                });
+            }
+
+            if (!unsubRequisitionsSecondary && allowSecondary) {
+                loadingRequisitions.classList.remove('hidden');
+                unsubRequisitionsSecondary = onSnapshot(requisitionsCollectionSecondary, s => {
+                    newRequisitionsDocs = s.docs.map(d => wrapRequisitionDoc(d, 'new'));
+                    refreshRequisitionViews();
+                    loadingRequisitions.classList.add('hidden');
+                }, err => {
+                    console.warn('Snapshot secundario indisponivel, mantendo somente o principal:', err);
+                    allowSecondary = false;
+                    if (unsubRequisitionsSecondary) {
+                        unsubRequisitionsSecondary();
+                        unsubRequisitionsSecondary = null;
+                    }
+                    newRequisitionsDocs = [];
+                    refreshRequisitionViews();
+                    loadingRequisitions.classList.add('hidden');
+                });
             }
 
             if (!unsubEmployees) {
@@ -1682,6 +1780,9 @@
                     allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name));
                     renderEmployees();
                     populateSelects();
+                    loadingEmployees.classList.add('hidden');
+                }, err => {
+                    console.warn('Snapshot de funcionarios indisponivel:', err);
                     loadingEmployees.classList.add('hidden');
                 });
             }
@@ -1695,6 +1796,9 @@
                     populateSelects();
                     populateMonthlyItemSelect();
                     loadingItems.classList.add('hidden');
+                }, err => {
+                    console.warn('Snapshot de itens indisponivel:', err);
+                    loadingItems.classList.add('hidden');
                 });
             }
 
@@ -1705,6 +1809,9 @@
                     renderStock();
                     renderItems();
                     loadingStock.classList.add('hidden');
+                }, err => {
+                    console.warn('Snapshot de estoque indisponivel:', err);
+                    loadingStock.classList.add('hidden');
                 });
             }
 
@@ -1712,15 +1819,17 @@
                 unsubKanban = onSnapshot(getReadCollection(kanbanEquipmentsCollection, kanbanEquipmentsReadCollection), s => {
                     allKanbanEquipmentsDocs = s.docs;
                     renderKanbanBoard();
+                }, err => {
+                    console.warn('Snapshot do kanban indisponivel:', err);
                 });
             }
         }
 
         function unsubscribeAll() {
-            [unsubRequisitions, unsubEmployees, unsubItems, unsubStock, unsubKanban].forEach((fn, idx) => {
+            [unsubRequisitionsPrimary, unsubRequisitionsSecondary, unsubEmployees, unsubItems, unsubStock, unsubKanban].forEach(fn => {
                 if (fn) fn();
             });
-            unsubRequisitions = unsubEmployees = unsubItems = unsubStock = unsubKanban = null;
+            unsubRequisitionsPrimary = unsubRequisitionsSecondary = unsubEmployees = unsubItems = unsubStock = unsubKanban = null;
         }
         
         const updatePendingBadge = () => {
@@ -1761,7 +1870,10 @@
             updatePendingBadge();
             
             // Paginação
-            const totalPages = Math.ceil(filteredDocs.length / requisitionsPerPage);
+            const totalPages = Math.max(1, Math.ceil(filteredDocs.length / requisitionsPerPage));
+            if (currentRequisitionsPage > totalPages) {
+                currentRequisitionsPage = totalPages;
+            }
             const startIndex = (currentRequisitionsPage - 1) * requisitionsPerPage;
             const endIndex = startIndex + requisitionsPerPage;
             const paginatedDocs = filteredDocs.slice(startIndex, endIndex);
@@ -1784,8 +1896,10 @@
             paginatedDocs.forEach(doc => {
                 const data = doc.data();
                 const id = doc.id;
-                const date = data.createdAt?.toDate().toLocaleDateString('pt-BR') || 'N/A';
-                const updatedAtText = data.statusUpdatedAt ? data.statusUpdatedAt.toDate().toLocaleString('pt-BR') : '-';
+                const createdDate = getRequisitionCreatedDate(data);
+                const updatedDate = getRequisitionUpdatedDate(data);
+                const date = createdDate ? createdDate.toLocaleDateString('pt-BR') : 'N/A';
+                const updatedAtText = updatedDate ? updatedDate.toLocaleString('pt-BR') : '-';
                 const itemDisplay = data.itemCode ? `[${data.itemCode}] - ${data.itemDescription}` : data.item;
                 const justification = data.justification ? (data.justification.length > 50 ? `${data.justification.slice(0, 50)}...` : data.justification) : '-';
                 requisitionsListBody.innerHTML += `<tr class="hover:bg-gray-50"><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${date}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${data.requester}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemDisplay}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${data.quantity}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" title="${data.justification || ''}">${justification}</td><td class="px-6 py-4 whitespace-nowrap"><span class="status-badge status-${data.status.toLowerCase()}">${data.status}</span></td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${updatedAtText}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium"><button data-id="${id}" data-status="${data.status}" class="update-status-btn ${!isLoggedIn ? 'text-gray-400 cursor-not-allowed' : 'text-blue-600 hover:text-blue-900'}" ${!isLoggedIn ? 'disabled' : ''}>Alterar</button></td></tr>`;
@@ -2064,8 +2178,12 @@
                 submitBtn.disabled = true;
                 
                 try {
+                    if (!isFirestoreReady) {
+                        throw new Error('A conexao com o Firestore ainda nao foi concluida.');
+                    }
+
                     const item = JSON.parse(itemSelect.value);
-                    await addDoc(requisitionsCollectionSecondary, {
+                    const requisitionData = {
                         requester: requesterSelect.value,
                         department: departmentInput.value,
                         itemCode: item.code,
@@ -2073,8 +2191,26 @@
                         quantity: Number(requisitionForm.quantity.value),
                         justification: requisitionForm.justification.value,
                         status: 'Pendente',
-                        createdAt: serverTimestamp()
-                    });
+                        createdAt: serverTimestamp(),
+                        createdAtClient: new Date().toISOString()
+                    };
+
+                    const { ref: newRequisitionRef, source } = await saveRequisitionWithFallback(requisitionData);
+
+                    const localDoc = {
+                        id: newRequisitionRef.id,
+                        data: () => requisitionData,
+                        source
+                    };
+
+                    if (source === 'new') {
+                        newRequisitionsDocs = [localDoc, ...newRequisitionsDocs.filter(doc => doc.id !== newRequisitionRef.id)];
+                    } else {
+                        oldRequisitionsDocs = [localDoc, ...oldRequisitionsDocs.filter(doc => doc.id !== newRequisitionRef.id)];
+                    }
+
+                    refreshRequisitionViews();
+
                     logMeta('requisition_create', {
                         requester: requesterSelect.value,
                         itemCode: item.code,
@@ -2086,6 +2222,9 @@
                     departmentInput.value = '';
                     itemSearchInput.value = '';
                     itemSearchDropdown.classList.remove('active');
+                } catch (error) {
+                    console.error('Erro ao criar requisicao:', error);
+                    alert(`Falha ao salvar a requisicao: ${error.message || error}`);
                 } finally {
                     // Reabilitar botão após 1 segundo
                     setTimeout(() => {
@@ -2895,11 +3034,15 @@
 
         loginLogoutBtn.addEventListener('click', async () => {
             if (isLoggedIn) {
-                unsubscribeAll();
                 isLoggedIn = false;
                 sessionStorage.removeItem('isUserLoggedIn'); // Remove o estado de login
                 updateUIForAuth();
-                updateFirebaseStatus('Aguardando login no Firebase...', 'warn', true);
+                if (isFirestoreReady) {
+                    startRealtimeListeners();
+                    updateFirebaseStatus('Dados sincronizados', 'success', true);
+                } else {
+                    updateFirebaseStatus('Aguardando conexao com Firebase...', 'warn', true);
+                }
             } else {
                 updateFirebaseStatus('Conectando ao Firebase...', 'info', true);
                 if (!auth.currentUser) {
