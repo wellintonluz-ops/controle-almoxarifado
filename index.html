@@ -1012,6 +1012,21 @@
             firebaseStatus.classList.remove('hidden');
         }
 
+        function isPermissionError(error) {
+            return error?.code === 'permission-denied' || String(error?.message || '').includes('Missing or insufficient permissions');
+        }
+
+        function updatePermissionStatus(error) {
+            if (!isPermissionError(error)) return;
+
+            if (!auth.currentUser) {
+                updateFirebaseStatus('Acesso exige login Google no Firebase. Clique em Conectar.', 'warn', true);
+                return;
+            }
+
+            updateFirebaseStatus('Usuario autenticado sem permissao nas regras do Firestore.', 'error', true);
+        }
+
         async function ensureGoogleAuth() {
             if (auth.currentUser) {
                 return true;
@@ -1582,9 +1597,17 @@
 
         async function setupAuthAndFirestore(forceGoogleLogin = false) {
             try {
-                if (!auth.currentUser && forceGoogleLogin) {
-                    updateFirebaseStatus('Conectando ao Firebase com Google...', 'info', true);
-                    await ensureGoogleAuth();
+                if (!auth.currentUser) {
+                    if (forceGoogleLogin) {
+                        updateFirebaseStatus('Conectando ao Firebase com Google...', 'info', true);
+                        await ensureGoogleAuth();
+                    } else {
+                        isFirestoreReady = false;
+                        [loadingRequisitions, loadingItems, loadingEmployees, loadingStock].forEach(l => l.classList.add('hidden'));
+                        updateUIForAuth();
+                        updateFirebaseStatus('Clique em Conectar para autenticar no Firebase com Google.', 'warn', true);
+                        return false;
+                    }
                 }
 
                 if (!auth.currentUser && isLoggedIn && !forceGoogleLogin) {
@@ -1623,6 +1646,7 @@
                     await getDocs(query(requisitionsCollectionSecondary, limit(1)));
                 } catch (err) {
                     console.warn('Sem permissão no projeto secundario, usando apenas projeto 1:', err);
+                    updatePermissionStatus(err);
                     allowSecondary = false;
                 }
 
@@ -1631,7 +1655,7 @@
                 await fetchInitialData();
                 updateUIForAuth();
                 startRealtimeListeners();
-                updateFirebaseStatus(auth.currentUser ? 'Conectado ao Firebase' : 'Dados sincronizados', 'success', true);
+                updateFirebaseStatus('Conectado ao Firebase', 'success', true);
                 setTimeout(() => updateFirebaseStatus('', 'info', false), 1500);
                 return true;
             } catch (error) {
@@ -1711,6 +1735,7 @@
                     }
 
                     console.warn(`Erro ao carregar ${label}:`, result.reason);
+                    updatePermissionStatus(result.reason);
                     if (typeof onError === 'function') {
                         onError(result.reason);
                     }
@@ -1751,6 +1776,7 @@
                     loadingRequisitions.classList.add('hidden');
                 }, err => {
                     console.warn('Snapshot do projeto principal indisponivel:', err);
+                    updatePermissionStatus(err);
                     loadingRequisitions.classList.add('hidden');
                 });
             }
@@ -1763,6 +1789,7 @@
                     loadingRequisitions.classList.add('hidden');
                 }, err => {
                     console.warn('Snapshot secundario indisponivel, mantendo somente o principal:', err);
+                    updatePermissionStatus(err);
                     allowSecondary = false;
                     if (unsubRequisitionsSecondary) {
                         unsubRequisitionsSecondary();
@@ -1783,6 +1810,7 @@
                     loadingEmployees.classList.add('hidden');
                 }, err => {
                     console.warn('Snapshot de funcionarios indisponivel:', err);
+                    updatePermissionStatus(err);
                     loadingEmployees.classList.add('hidden');
                 });
             }
@@ -1798,6 +1826,7 @@
                     loadingItems.classList.add('hidden');
                 }, err => {
                     console.warn('Snapshot de itens indisponivel:', err);
+                    updatePermissionStatus(err);
                     loadingItems.classList.add('hidden');
                 });
             }
@@ -1811,6 +1840,7 @@
                     loadingStock.classList.add('hidden');
                 }, err => {
                     console.warn('Snapshot de estoque indisponivel:', err);
+                    updatePermissionStatus(err);
                     loadingStock.classList.add('hidden');
                 });
             }
@@ -1821,6 +1851,7 @@
                     renderKanbanBoard();
                 }, err => {
                     console.warn('Snapshot do kanban indisponivel:', err);
+                    updatePermissionStatus(err);
                 });
             }
         }
@@ -2119,6 +2150,7 @@
             const gestaoRecebimentoBtn = document.getElementById('gestao-recebimento-btn');
             const isReady = isFirestoreReady;
             const isAdmin = isLoggedIn;
+            const hasFirebaseSession = !!auth.currentUser;
 
             const tabs = [tabDashboard, tabStock, tabKanban, tabLabels, tabItems, tabEmployees, tabCatalog];
             if (isAdmin) {
@@ -2126,7 +2158,7 @@
                 loginLogoutBtn.classList.replace('btn-primary', 'btn-secondary');
                 tabs.forEach(t => t.classList.remove('hidden'));
             } else {
-                loginLogoutBtn.textContent = 'Login';
+                loginLogoutBtn.textContent = hasFirebaseSession ? 'Login Admin' : 'Conectar';
                 loginLogoutBtn.classList.replace('btn-secondary', 'btn-primary');
                 tabs.forEach(t => t.classList.add('hidden'));
                 if (tabs.some(t => t.classList.contains('tab-active'))) {
@@ -3038,20 +3070,21 @@
                 sessionStorage.removeItem('isUserLoggedIn'); // Remove o estado de login
                 updateUIForAuth();
                 if (isFirestoreReady) {
-                    startRealtimeListeners();
-                    updateFirebaseStatus('Dados sincronizados', 'success', true);
+                    updateFirebaseStatus('Conectado ao Firebase', 'success', true);
                 } else {
                     updateFirebaseStatus('Aguardando conexao com Firebase...', 'warn', true);
                 }
             } else {
-                updateFirebaseStatus('Conectando ao Firebase...', 'info', true);
                 if (!auth.currentUser) {
                     const firebaseReady = await setupAuthAndFirestore(true);
                     if (!firebaseReady) {
                         alert('Nao foi possivel autenticar com Google no Firebase. Verifique se o provedor Google esta habilitado e se este dominio esta autorizado.');
                         return;
                     }
-                } else if (!isFirestoreReady) {
+                    return;
+                }
+
+                if (!isFirestoreReady) {
                     const firebaseReady = await setupAuthAndFirestore(false);
                     if (!firebaseReady) {
                         alert('Nao foi possivel inicializar o Firestore com o usuario Google atual.');
@@ -3703,7 +3736,7 @@
             let isHandlingAuthState = false;
             let firstAuthEventHandled = false;
 
-            updateFirebaseStatus('Conectando ao Firebase...', 'info', true);
+            updateFirebaseStatus('Verificando sessao do Firebase...', 'info', true);
 
             onAuthStateChanged(auth, async (user) => {
                 if (isHandlingAuthState) return;
@@ -3713,10 +3746,14 @@
                     if (user) {
                         await setupAuthAndFirestore(false);
                     } else {
-                        await setupAuthAndFirestore(false);
+                        isFirestoreReady = false;
+                        unsubscribeAll();
+                        updateUIForAuth();
 
                         if (shouldForceGoogleAtStartup && !firstAuthEventHandled) {
-                            updateFirebaseStatus('Sessao expirada. Clique em Login para reconectar.', 'warn', true);
+                            updateFirebaseStatus('Sessao expirada. Clique em Conectar para autenticar novamente.', 'warn', true);
+                        } else {
+                            updateFirebaseStatus('Clique em Conectar para autenticar no Firebase com Google.', 'warn', true);
                         }
                     }
                 } finally {
