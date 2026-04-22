@@ -1003,7 +1003,7 @@
         const pendingCount = document.getElementById('pending-count');
 
 
-        let requisitionsCollectionPrimary, requisitionsCollectionSecondary, itemsCollection, employeesCollection, stockLocationsCollection, kanbanEquipmentsCollection, metaLogsCollection, metaCountersCollection;
+        let requisitionsCollectionPrimary, requisitionsCollectionSecondary, itemsCollection, employeesCollection, stockLocationsCollection, stockLocationsSecondaryCollection, kanbanEquipmentsCollection, metaLogsCollection, metaCountersCollection;
         let itemsReadCollection, employeesReadCollection, stockLocationsReadCollection, kanbanEquipmentsReadCollection;
         let unsubRequisitionsPrimary = null, unsubRequisitionsSecondary = null, unsubItems = null, unsubEmployees = null, unsubStock = null, unsubKanban = null;
         let isLoggedIn = false;
@@ -1026,6 +1026,8 @@
         let selectedMonthlyYear = new Date().getFullYear();
         let monthlyItemSearchTerm = '';
         let allowSecondary = true;
+        let allowSecondaryStock = false;
+        let stockFirestoreDb = db;
         let hasProcessedRedirectResult = false;
 
         function updateFirebaseStatus(message = '', type = 'info', visible = false) {
@@ -1227,6 +1229,19 @@
 
         function wrapRequisitionDoc(snap, source) {
             return { id: snap.id, data: () => snap.data(), source };
+        }
+
+        function getStockDbBySource() {
+            return secondaryDb;
+        }
+
+        function getStockDocRef(stockEntryOrId) {
+            const stockId = typeof stockEntryOrId === 'string' ? stockEntryOrId : stockEntryOrId.id;
+            return doc(stockLocationsSecondaryCollection, stockId);
+        }
+
+        function getStockEntryById(stockLocationId) {
+            return allStockLocationsDocs.find(stockDoc => stockDoc.id === stockLocationId) || null;
         }
 
         function syncRequisitionState() {
@@ -1792,11 +1807,13 @@
                 const metaBasePath = `/artifacts/${secondaryAppId}/public/meta`;
                 const secondaryBasePath = `/artifacts/${secondaryAppId}/public/data`;
 
+                stockLocationsSecondaryCollection = collection(secondaryDb, `${secondaryBasePath}/stockLocations`);
+
                 // Escrita (DB principal)
                 requisitionsCollectionPrimary = collection(db, `${basePath}/requisitions`);
                 itemsCollection = collection(db, `${basePath}/items`);
                 employeesCollection = collection(db, `${basePath}/employees`);
-                stockLocationsCollection = collection(db, `${basePath}/stockLocations`);
+                stockLocationsCollection = stockLocationsSecondaryCollection;
                 kanbanEquipmentsCollection = collection(db, `${basePath}/kanbanEquipments`);
 
                 // Escrita/Leitura de novas requisicoes (DB secundario)
@@ -1805,7 +1822,7 @@
                 // Leitura padrão (usar primário; secundário só quando tivermos replicação)
                 itemsReadCollection = itemsCollection;
                 employeesReadCollection = employeesCollection;
-                stockLocationsReadCollection = stockLocationsCollection;
+                stockLocationsReadCollection = stockLocationsSecondaryCollection;
                 kanbanEquipmentsReadCollection = kanbanEquipmentsCollection;
 
                 metaLogsCollection = collection(secondaryDb, `${metaBasePath}/logs`);
@@ -1813,6 +1830,8 @@
 
                 // Testa acesso à coleção de novas requisições; se falhar, desabilita uso do secundário
                 allowSecondary = true;
+                allowSecondaryStock = false;
+                stockFirestoreDb = secondaryDb;
                 await secondaryAuthInitPromise;
                 if (!secondaryAuth.currentUser) {
                     allowSecondary = false;
@@ -1829,6 +1848,19 @@
 
                 if (!allowSecondary) {
                     console.warn('Projeto secundario sem sessao valida. Historico recente pode nao aparecer neste navegador.');
+                } else {
+                    try {
+                        await getDocs(query(stockLocationsSecondaryCollection, limit(1)));
+                        allowSecondaryStock = true;
+                        stockLocationsCollection = stockLocationsSecondaryCollection;
+                        stockLocationsReadCollection = stockLocationsSecondaryCollection;
+                        stockFirestoreDb = secondaryDb;
+                    } catch (err) {
+                        console.warn('Sem permissão no projeto secundario para estoque:', err);
+                        updatePermissionStatus(err);
+                        allowSecondaryStock = false;
+                        throw err;
+                    }
                 }
 
                 isFirestoreReady = true;
@@ -1900,13 +1932,16 @@
                 const reqNewSnapPromise = allowSecondary
                     ? getDocs(requisitionsCollectionSecondary)
                     : Promise.resolve({ docs: [] });
+                const stockSecondarySnapPromise = allowSecondaryStock
+                    ? getDocs(stockLocationsSecondaryCollection)
+                    : Promise.resolve({ docs: [] });
 
-                const [reqOldResult, reqNewResult, empResult, itemResult, stockResult, kanbanResult] = await Promise.allSettled([
+                const [reqOldResult, reqNewResult, empResult, itemResult, stockSecondaryResult, kanbanResult] = await Promise.allSettled([
                     reqOldSnapPromise,
                     reqNewSnapPromise,
                     getDocs(getReadCollection(employeesCollection, employeesReadCollection)),
                     getDocs(getReadCollection(itemsCollection, itemsReadCollection)),
-                    getDocs(getReadCollection(stockLocationsCollection, stockLocationsReadCollection)),
+                    stockSecondarySnapPromise,
                     getDocs(getReadCollection(kanbanEquipmentsCollection, kanbanEquipmentsReadCollection))
                 ]);
 
@@ -1929,7 +1964,7 @@
                 }).map(d => wrapRequisitionDoc(d, 'new'));
                 allEmployeesDocs = getDocsFromResult(empResult, 'funcionarios').sort((a, b) => a.data().name.localeCompare(b.data().name));
                 allItemsDocs = getDocsFromResult(itemResult, 'itens').sort((a, b) => a.data().description.localeCompare(b.data().description));
-                allStockLocationsDocs = getDocsFromResult(stockResult, 'estoque').sort((a, b) => a.data().address.localeCompare(b.data().address));
+                allStockLocationsDocs = getDocsFromResult(stockSecondaryResult, 'estoque do projeto secundario').sort((a, b) => (a.data().address || '').localeCompare(b.data().address || ''));
                 allKanbanEquipmentsDocs = getDocsFromResult(kanbanResult, 'equipamentos kanban');
 
                 refreshRequisitionViews();
@@ -2012,15 +2047,15 @@
                 });
             }
 
-            if (!unsubStock) {
+            if (!unsubStock && allowSecondaryStock) {
                 loadingStock.classList.remove('hidden');
-                unsubStock = onSnapshot(getReadCollection(stockLocationsCollection, stockLocationsReadCollection), s => {
-                    allStockLocationsDocs = s.docs.sort((a, b) => a.data().address.localeCompare(b.data().address));
+                unsubStock = onSnapshot(stockLocationsSecondaryCollection, s => {
+                    allStockLocationsDocs = s.docs.sort((a, b) => (a.data().address || '').localeCompare(b.data().address || ''));
                     renderStock();
                     renderItems();
                     loadingStock.classList.add('hidden');
                 }, err => {
-                    console.warn('Snapshot de estoque indisponivel:', err);
+                    console.warn('Snapshot de estoque do projeto secundario indisponivel:', err);
                     updatePermissionStatus(err);
                     loadingStock.classList.add('hidden');
                 });
@@ -2293,7 +2328,12 @@
                             const code = delBtn.dataset.code;
                             const address = delBtn.dataset.address;
                             if (confirm(`Excluir o registro do item "${code}" no endereço "${address}"? Esta ação não pode ser desfeita.`)) {
-                                await deleteDoc(doc(stockLocationsCollection, delBtn.dataset.id));
+                                const stockEntry = getStockEntryById(delBtn.dataset.id);
+                                if (!stockEntry) {
+                                    alert('Registro de estoque não encontrado.');
+                                    return;
+                                }
+                                await deleteDoc(getStockDocRef(stockEntry));
                             }
                         });
                     }
@@ -2562,7 +2602,7 @@
                 try {
                     if (existingLocation) {
                         const newQuantity = (existingLocation.data().quantity || 0) + quantityToAdd;
-                        await updateDoc(doc(stockLocationsCollection, existingLocation.id), { quantity: newQuantity });
+                        await updateDoc(getStockDocRef(existingLocation), { quantity: newQuantity });
                         logMeta('stock_entry', {
                             itemCode: itemData.code,
                             address,
@@ -2618,7 +2658,7 @@
                 try {
                     // Reduzir quantidade na origem
                     const newFromQuantity = currentQuantity - quantityToTransfer;
-                    await updateDoc(doc(stockLocationsCollection, fromLocationId), { quantity: newFromQuantity });
+                    await updateDoc(getStockDocRef(fromLocation), { quantity: newFromQuantity });
                     
                     // Adicionar ou aumentar quantidade no destino
                     const existingToLocation = allStockLocationsDocs.find(doc => 
@@ -2628,7 +2668,7 @@
                     
                     if (existingToLocation) {
                         const newToQuantity = (existingToLocation.data().quantity || 0) + quantityToTransfer;
-                        await updateDoc(doc(stockLocationsCollection, existingToLocation.id), { quantity: newToQuantity });
+                        await updateDoc(getStockDocRef(existingToLocation), { quantity: newToQuantity });
                     } else {
                         await addDoc(stockLocationsCollection, {
                             itemCode: itemData.code,
@@ -2681,7 +2721,7 @@
 
                 try {
                     const newQty = currentQty - quantityToOut;
-                    await updateDoc(doc(stockLocationsCollection, locationId), { quantity: newQty });
+                    await updateDoc(getStockDocRef(locDoc), { quantity: newQty });
                     logMeta('stock_out', {
                         itemCode: locDoc.data().itemCode,
                         address: locDoc.data().address,
@@ -2724,7 +2764,8 @@
                     const json = XLSX.utils.sheet_to_json(worksheet);
                     if (json.length === 0) throw new Error("A planilha está vazia.");
                     
-                    const batch = writeBatch(db);
+                    const itemsBatch = writeBatch(db);
+                    const stockBatch = writeBatch(stockFirestoreDb);
                     const newCodesInBatch = new Set();
                     const existingCodes = new Set(allItemsDocs.map(doc => doc.data().code.toUpperCase()));
                     let skippedDuplicates = 0;
@@ -2751,7 +2792,7 @@
 
                         if (!existingCodes.has(codeUpper) && !newCodesInBatch.has(codeUpper)) {
                             const newItemRef = doc(itemsCollection);
-                            batch.set(newItemRef, { code, description, safetyStock, active: true });
+                            itemsBatch.set(newItemRef, { code, description, safetyStock, active: true });
                             newCodesInBatch.add(codeUpper);
                         } else {
                             skippedDuplicates++;
@@ -2759,11 +2800,12 @@
 
                         if (address && quantity > 0) {
                             const newLocationRef = doc(stockLocationsCollection);
-                            batch.set(newLocationRef, { itemCode: code, address, quantity });
+                            stockBatch.set(newLocationRef, { itemCode: code, address, quantity });
                         }
                     }
                     
-                    await batch.commit();
+                    await itemsBatch.commit();
+                    await stockBatch.commit();
                     const successMsg = `${json.length} linhas processadas com sucesso!`;
                     const duplicatesMsg = skippedDuplicates > 0 ? ` (${skippedDuplicates} códigos duplicados foram ignorados)` : '';
                     importFeedback.textContent = successMsg + duplicatesMsg;
@@ -2960,11 +3002,13 @@
                 const { stockLocationId, quantity } = reqDocSnap.data();
                 const updateData = { status: newStatus, statusUpdatedAt: serverTimestamp() };
 
-                // Se estiver revertendo uma entrega, devolve estoque no primário
+                // Se estiver revertendo uma entrega, devolve ao projeto de origem do registro de estoque
                 if (newStatus !== 'Entregue' && oldStatus === 'Entregue') {
                     if (!stockLocationId) throw "Não foi possível reverter a entrega: Localização de origem desconhecida.";
-                    await runTransaction(db, async (transaction) => {
-                        const locationToUpdateRef = doc(stockLocationsCollection, stockLocationId);
+                    const stockEntry = getStockEntryById(stockLocationId);
+                    if (!stockEntry) throw "Localização de estoque da entrega anterior não encontrada.";
+                    await runTransaction(getStockDbBySource(stockEntry.source), async (transaction) => {
+                        const locationToUpdateRef = getStockDocRef(stockEntry);
                         const locationDoc = await transaction.get(locationToUpdateRef);
                         if (!locationDoc.exists()) throw "Localização de estoque da entrega anterior não encontrada.";
                         const newQuantity = (locationDoc.data().quantity || 0) + quantity;
@@ -3013,10 +3057,15 @@
             }
 
             const { quantity } = reqDocSnap.data();
-            const locationToUpdateRef = doc(stockLocationsCollection, locationId);
+            const stockEntry = getStockEntryById(locationId);
+            if (!stockEntry) {
+                alert('Localização de estoque selecionada não existe mais.');
+                return;
+            }
+            const locationToUpdateRef = getStockDocRef(stockEntry);
 
             try {
-                await runTransaction(db, async (transaction) => {
+                await runTransaction(getStockDbBySource(stockEntry.source), async (transaction) => {
                     const locationDoc = await transaction.get(locationToUpdateRef);
                     if (!locationDoc.exists()) throw "Localização de estoque selecionada não existe mais.";
                     const currentStock = locationDoc.data().quantity || 0;
@@ -3621,11 +3670,11 @@
                 let deletedCount = 0;
 
                 for (let i = 0; i < allStockLocationsDocs.length; i += chunkSize) {
-                    const batch = writeBatch(db);
+                    const batch = writeBatch(secondaryDb);
                     const chunk = allStockLocationsDocs.slice(i, i + chunkSize);
 
                     chunk.forEach(stockDoc => {
-                        batch.delete(doc(stockLocationsCollection, stockDoc.id));
+                        batch.delete(getStockDocRef(stockDoc));
                     });
 
                     await batch.commit();
