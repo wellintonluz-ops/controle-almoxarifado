@@ -49,6 +49,22 @@
             width: 40px; height: 40px; animation: spin 1s linear infinite;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes blink-red {
+            0%, 100% { background-color: #dc2626; opacity: 1; }
+            50% { background-color: #b91c1c; opacity: 0.6; }
+        }
+        .aviso-piscante {
+            animation: blink-red 1s ease-in-out infinite;
+            background-color: #dc2626;
+            color: #ffffff;
+            border-radius: 0.375rem;
+            padding: 0.75rem 1rem;
+            font-weight: 600;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
         .hidden { display: none; }
         .tab {
             cursor: pointer; padding: 0.75rem 1.5rem;
@@ -373,6 +389,7 @@
         <div id="view-requisitions">
             <div class="bg-white p-6 rounded-lg shadow-md mb-8">
                 <h2 class="text-xl font-semibold mb-4">Criar Nova Requisição</h2>
+                <div class="aviso-piscante">⚠️ Requisições realizadas até às 10h serão atendidas no mesmo dia. Após esse horário, o atendimento poderá ocorrer no próximo dia útil.<br><br>Pedimos que as áreas se planejem com antecedência, evitando solicitações de última hora. Não nos responsabilizamos por processos parados devido à falta de materiais de fácil controle interno da área.</div>
                 <form id="requisition-form" class="grid grid-cols-1 md:grid-cols-6 gap-6">
                     <div class="md:col-span-3"><label for="requester-select" class="block text-sm font-medium text-gray-700">Solicitante</label><select id="requester-select" name="requester" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"><option value="">Selecione um funcionário...</option></select></div>
                     <div class="md:col-span-3"><label for="department" class="block text-sm font-medium text-gray-700">Departamento</label><input type="text" id="department" name="department" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 focus:outline-none sm:text-sm"></div>
@@ -783,6 +800,48 @@
 
     <!-- Modais -->
     <div id="login-modal" class="modal-backdrop hidden"><div class="modal-content"><h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">Acesso Restrito</h3><p class="text-sm text-gray-600 mb-4">Por favor, insira suas credenciais para gerenciar o sistema.</p><form id="login-form"><div class="mb-4"><label for="login-user" class="block text-sm font-medium text-gray-700">Login</label><input type="text" id="login-user" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div><div><label for="login-pass" class="block text-sm font-medium text-gray-700">Senha</label><input type="password" id="login-pass" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div><p id="login-error" class="text-sm text-red-600 mt-2 hidden">Login ou senha inválidos.</p><div class="mt-6 flex justify-end space-x-4"><button type="button" id="cancel-login" class="py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">Cancelar</button><button type="submit" class="btn-primary py-2 px-4 rounded-md shadow-sm text-sm font-medium">Entrar</button></div></form></div></div>
+    <!-- Modal Editar Estoque por Endereço -->
+    <div id="edit-stock-modal" class="modal-backdrop hidden">
+        <div class="modal-content" style="max-width:480px">
+            <h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">Editar Registro de Estoque</h3>
+            <input type="hidden" id="edit-stock-loc-id">
+            <input type="hidden" id="edit-stock-item-id">
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700">Código do Item</label>
+                <input type="text" id="edit-stock-item-code" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-sm">
+            </div>
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700">Descrição</label>
+                <input type="text" id="edit-stock-description" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-sm">
+            </div>
+            <div class="mb-4">
+                <label for="edit-stock-depot" class="block text-sm font-medium text-gray-700">Depósito</label>
+                <select id="edit-stock-depot" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                    <option value="">Sem depósito</option>
+                    <option value="Almox. Interno">Almox. Interno</option>
+                    <option value="Almox. Porta Pallet">Almox. Porta Pallet</option>
+                    <option value="Almox. Blocado">Almox. Blocado</option>
+                </select>
+            </div>
+            <div class="mb-4">
+                <label for="edit-stock-address" class="block text-sm font-medium text-gray-700">Endereço</label>
+                <input type="text" id="edit-stock-address" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+            </div>
+            <div class="mb-4">
+                <label for="edit-stock-quantity" class="block text-sm font-medium text-gray-700">Quantidade</label>
+                <input type="number" id="edit-stock-quantity" min="0" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+            </div>
+            <div class="mb-4">
+                <label for="edit-stock-safety" class="block text-sm font-medium text-gray-700">Estoque de Segurança</label>
+                <input type="number" id="edit-stock-safety" min="0" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+            </div>
+            <p id="edit-stock-error" class="text-sm text-red-600 mt-2 hidden">Erro ao salvar. Tente novamente.</p>
+            <div class="mt-6 flex justify-end space-x-4">
+                <button type="button" id="cancel-edit-stock" class="py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">Cancelar</button>
+                <button type="button" id="confirm-edit-stock" class="btn-primary py-2 px-4 rounded-md shadow-sm text-sm font-medium">Salvar</button>
+            </div>
+        </div>
+    </div>
     <div id="status-modal" class="modal-backdrop hidden"><div class="modal-content"><h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">Atualizar Status da Requisição</h3><div><label for="status-select" class="block text-sm font-medium text-gray-700">Novo Status</label><select id="status-select" name="status-select" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"><option>Pendente</option><option>Rejeitado</option><option>Entregue</option></select><input type="hidden" id="modal-requisition-id"><input type="hidden" id="modal-original-status"></div><div class="mt-6 flex justify-end space-x-4"><button type="button" id="cancel-update" class="py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">Cancelar</button><button type="button" id="confirm-update" class="btn-primary py-2 px-4 rounded-md shadow-sm text-sm font-medium">Salvar</button></div></div></div>
     <div id="location-select-modal" class="modal-backdrop hidden">
         <div class="modal-content">
@@ -2145,7 +2204,7 @@
                 const id = doc.id;
                 const createdDate = getRequisitionCreatedDate(data);
                 const updatedDate = getRequisitionUpdatedDate(data);
-                const date = createdDate ? createdDate.toLocaleDateString('pt-BR') : 'N/A';
+                const date = createdDate ? createdDate.toLocaleString('pt-BR') : 'N/A';
                 const updatedAtText = updatedDate ? updatedDate.toLocaleString('pt-BR') : '-';
                 const itemDisplay = data.itemCode ? `[${data.itemCode}] - ${data.itemDescription}` : data.item;
                 const justification = data.justification ? (data.justification.length > 50 ? `${data.justification.slice(0, 50)}...` : data.justification) : '-';
@@ -2306,7 +2365,7 @@
                     <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-700">${addrDisplay}</td>
                     <td class="px-2 py-3 whitespace-nowrap text-center text-sm text-gray-700">${safetyStock}</td>
                     <td class="px-2 py-3 whitespace-nowrap text-center text-lg font-bold">${locData.quantity}</td>
-                    <td class="px-2 py-3 whitespace-nowrap text-center text-sm">${isLoggedIn ? `<button class="delete-stock-loc-btn text-red-600 hover:text-red-900 font-medium text-xs border border-red-300 rounded px-2 py-1 hover:bg-red-50" data-id="${locDoc.id}" data-code="${locData.itemCode}" data-address="${locData.address}">Excluir</button>` : ''}</td>
+                    <td class="px-2 py-3 whitespace-nowrap text-center text-sm">${isLoggedIn ? `<div class="flex items-center justify-center gap-1"><button class="edit-stock-loc-btn text-blue-600 hover:text-blue-900 font-medium text-xs border border-blue-300 rounded px-2 py-1 hover:bg-blue-50" data-id="${locDoc.id}">Editar</button><button class="delete-stock-loc-btn text-red-600 hover:text-red-900 font-medium text-xs border border-red-300 rounded px-2 py-1 hover:bg-red-50" data-id="${locDoc.id}" data-code="${locData.itemCode}" data-address="${locData.address}">Excluir</button></div>` : ''}</td>
                 `;
                 
                 // Adicionar evento de clique no código se tiver foto
@@ -2318,6 +2377,32 @@
                         modalImage.src = photoSrc;
                         imageModal.classList.add('active');
                     });
+                }
+
+                // Botão editar registro individual
+                if (isLoggedIn) {
+                    const editBtn = row.querySelector('.edit-stock-loc-btn');
+                    if (editBtn) {
+                        editBtn.addEventListener('click', () => {
+                            const stockEntry = getStockEntryById(editBtn.dataset.id);
+                            if (!stockEntry) return;
+                            const sData = stockEntry.data();
+                            const itemDoc = allItemsDocs.find(d => d.data().code === sData.itemCode);
+                            document.getElementById('edit-stock-loc-id').value = stockEntry.id;
+                            document.getElementById('edit-stock-item-id').value = itemDoc ? itemDoc.id : '';
+                            document.getElementById('edit-stock-item-code').value = sData.itemCode || '';
+                            document.getElementById('edit-stock-description').value = itemDoc ? itemDoc.data().description : '';
+                            const addrParts = (sData.address || '').split(' - ');
+                            const depotVal  = addrParts.length > 1 ? addrParts[0] : '';
+                            const addrOnly  = addrParts.length > 1 ? addrParts.slice(1).join(' - ') : (sData.address || '');
+                            document.getElementById('edit-stock-depot').value = depotVal;
+                            document.getElementById('edit-stock-address').value = addrOnly;
+                            document.getElementById('edit-stock-quantity').value = sData.quantity ?? 0;
+                            document.getElementById('edit-stock-safety').value = itemDoc ? (itemDoc.data().safetyStock ?? 0) : 0;
+                            document.getElementById('edit-stock-error').classList.add('hidden');
+                            document.getElementById('edit-stock-modal').classList.remove('hidden');
+                        });
+                    }
                 }
 
                 // Botão excluir registro individual
@@ -2396,6 +2481,13 @@
             requesterSelect.value = currentReq;
             userSelect.value = currentUserSelect;
         };
+
+        function stockEntryFieldsValid() {
+            const item    = document.getElementById('stock-item-select')?.value;
+            const depot   = document.getElementById('stock-entry-depot')?.value;
+            const address = document.getElementById('stock-entry-address')?.value?.trim();
+            return !!item && !!depot && !!address;
+        }
         
         function updateUIForAuth() {
             const gestaoRecebimentoBtn = document.getElementById('gestao-recebimento-btn');
@@ -2422,7 +2514,7 @@
             const requisitionSubmitBtn = document.querySelector('#requisition-form button[type="submit"]');
             if (requisitionSubmitBtn) requisitionSubmitBtn.disabled = !isReady;
             
-            if (submitStockEntryBtn) submitStockEntryBtn.disabled = !isAdminReady;
+            if (submitStockEntryBtn) submitStockEntryBtn.disabled = !isAdminReady || !stockEntryFieldsValid();
             if (submitTransferBtn) submitTransferBtn.disabled = !isAdminReady;
             if (submitStockOutBtn) submitStockOutBtn.disabled = !isAdminReady;
             if (clearStockPanelBtn) clearStockPanelBtn.disabled = !isAdminReady;
@@ -2591,9 +2683,13 @@
             stockEntryForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 if (!isLoggedIn) return;
-                const itemData = JSON.parse(stockItemSelect.value);
                 const depot = document.getElementById('stock-entry-depot').value.trim();
                 const addressRaw = document.getElementById('stock-entry-address').value.trim();
+                if (!stockItemSelect.value || !depot || !addressRaw) {
+                    alert('Produto, Depósito e Endereço são obrigatórios para registrar a entrada.');
+                    return;
+                }
+                const itemData = JSON.parse(stockItemSelect.value);
                 const address = depot ? `${depot} - ${addressRaw}` : addressRaw;
                 const quantityToAdd = Number(document.getElementById('stock-entry-quantity').value);
 
@@ -2630,7 +2726,17 @@
                     alert("Falha ao registrar entrada.");
                 }
             });
-            
+
+            // Validação em tempo real da Entrada Manual
+            function refreshStockEntryBtn() {
+                if (submitStockEntryBtn) {
+                    submitStockEntryBtn.disabled = !(isLoggedIn && isFirestoreReady) || !stockEntryFieldsValid();
+                }
+            }
+            stockItemSelect.addEventListener('change', refreshStockEntryBtn);
+            document.getElementById('stock-entry-depot').addEventListener('change', refreshStockEntryBtn);
+            document.getElementById('stock-entry-address').addEventListener('input', refreshStockEntryBtn);
+
             stockTransferForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 if (!isLoggedIn) return;
@@ -3391,6 +3497,46 @@
         cancelLocationSelectionBtn.addEventListener('click', () => locationSelectModal.classList.add('hidden'));
         confirmLocationSelectionBtn.addEventListener('click', confirmDeliveryFromLocation);
         cancelEditItemBtn.addEventListener('click', () => editItemModal.classList.add('hidden'));
+
+        // Editar Estoque por Endereço
+        document.getElementById('cancel-edit-stock').addEventListener('click', () => {
+            document.getElementById('edit-stock-modal').classList.add('hidden');
+        });
+        document.getElementById('confirm-edit-stock').addEventListener('click', async () => {
+            const locId      = document.getElementById('edit-stock-loc-id').value;
+            const itemId     = document.getElementById('edit-stock-item-id').value;
+            const newDepot   = document.getElementById('edit-stock-depot').value.trim();
+            const newAddrOnly= document.getElementById('edit-stock-address').value.trim();
+            const newAddr    = newDepot ? `${newDepot} - ${newAddrOnly}` : newAddrOnly;
+            const newQty     = parseInt(document.getElementById('edit-stock-quantity').value, 10);
+            const newSafety  = parseInt(document.getElementById('edit-stock-safety').value, 10);
+            const errEl      = document.getElementById('edit-stock-error');
+            errEl.classList.add('hidden');
+            if (!newAddrOnly || isNaN(newQty) || newQty < 0 || isNaN(newSafety) || newSafety < 0) {
+                errEl.textContent = 'Preencha todos os campos corretamente.';
+                errEl.classList.remove('hidden');
+                return;
+            }
+            const saveBtn = document.getElementById('confirm-edit-stock');
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Salvando...';
+            try {
+                const stockEntry = getStockEntryById(locId);
+                if (stockEntry) {
+                    await updateDoc(getStockDocRef(stockEntry), { address: newAddr, quantity: newQty });
+                }
+                if (itemId) {
+                    await updateDoc(doc(itemsCollection, itemId), { safetyStock: newSafety });
+                }
+                document.getElementById('edit-stock-modal').classList.add('hidden');
+            } catch(e) {
+                errEl.textContent = 'Erro ao salvar: ' + e.message;
+                errEl.classList.remove('hidden');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Salvar';
+            }
+        });
         
         // KANBAN Modal Listeners
         addEquipmentBtn.addEventListener('click', () => {
