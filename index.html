@@ -434,6 +434,7 @@
                         <div class="flex justify-between items-center mb-4">
                             <h2 class="text-xl font-semibold">Painel de Estoque por Endereço</h2>
                             <div class="flex items-center gap-3">
+                                <button id="consolidate-stock-btn" class="font-semibold py-2 px-3 rounded-md shadow-sm text-sm text-white disabled:opacity-50" style="background-color:#7c3aed" disabled>Consolidar Duplicatas</button>
                                 <button id="clear-stock-panel-btn" class="btn-danger font-semibold py-2 px-3 rounded-md shadow-sm text-sm" disabled>Limpar Painel de Estoque</button>
                                 <div id="loading-stock" class="loader hidden"></div>
                             </div>
@@ -938,7 +939,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, runTransaction, writeBatch, getDocs, orderBy, limit, setDoc, increment, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, where, runTransaction, writeBatch, getDocs, orderBy, limit, setDoc, increment, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
         // ************************************************************************************
@@ -2518,6 +2519,8 @@
             if (submitTransferBtn) submitTransferBtn.disabled = !isAdminReady;
             if (submitStockOutBtn) submitStockOutBtn.disabled = !isAdminReady;
             if (clearStockPanelBtn) clearStockPanelBtn.disabled = !isAdminReady;
+            const consolidateStockBtn = document.getElementById('consolidate-stock-btn');
+            if (consolidateStockBtn) consolidateStockBtn.disabled = !isAdminReady;
             if (submitItemBtn) submitItemBtn.disabled = !isAdminReady;
             if (submitEmployeeBtn) submitEmployeeBtn.disabled = !isAdminReady;
             if (importExcelBtn) importExcelBtn.disabled = !isAdminReady;
@@ -2690,15 +2693,34 @@
                     return;
                 }
                 const itemData = JSON.parse(stockItemSelect.value);
-                const address = depot ? `${depot} - ${addressRaw}` : addressRaw;
+                const address = (depot ? `${depot} - ${addressRaw}` : addressRaw).replace(/\s+/g, ' ').trim();
                 const quantityToAdd = Number(document.getElementById('stock-entry-quantity').value);
 
-                const existingLocation = allStockLocationsDocs.find(doc => doc.data().itemCode === itemData.code && doc.data().address === address);
+                // Busca diretamente no Firestore para evitar falsos negativos por cache desatualizado
+                let existingLocation = null;
+                try {
+                    const q = query(stockLocationsSecondaryCollection,
+                        where('itemCode', '==', itemData.code),
+                        where('address', '==', address)
+                    );
+                    const snap = await getDocs(q);
+                    if (!snap.empty) existingLocation = snap.docs[0];
+                } catch (_) {
+                    // Fallback para cache local se a query falhar
+                    existingLocation = allStockLocationsDocs.find(d =>
+                        d.data().itemCode === itemData.code &&
+                        (d.data().address || '').replace(/\s+/g, ' ').trim() === address
+                    ) || null;
+                }
+
+                const existingLocationForUpdate = existingLocation
+                    ? (existingLocation.ref ? existingLocation : getStockEntryById(existingLocation.id))
+                    : null;
                 
                 try {
-                    if (existingLocation) {
-                        const newQuantity = (existingLocation.data().quantity || 0) + quantityToAdd;
-                        await updateDoc(getStockDocRef(existingLocation), { quantity: newQuantity });
+                    if (existingLocationForUpdate) {
+                        const newQuantity = (existingLocationForUpdate.data().quantity || 0) + quantityToAdd;
+                        await updateDoc(existingLocationForUpdate.ref || getStockDocRef(existingLocationForUpdate), { quantity: newQuantity });
                         logMeta('stock_entry', {
                             itemCode: itemData.code,
                             address,
@@ -3864,6 +3886,59 @@
         cleanDuplicatesBtn.addEventListener('click', cleanDuplicateItems);
         if (clearStockPanelBtn) {
             clearStockPanelBtn.addEventListener('click', clearAllStockRecords);
+        }
+
+        // Consolidar duplicatas de estoque (mesmo itemCode + mesmo endereço)
+        const consolidateStockBtn = document.getElementById('consolidate-stock-btn');
+        if (consolidateStockBtn) {
+            consolidateStockBtn.addEventListener('click', async () => {
+                if (!isLoggedIn) return;
+                if (!confirm('Isso irá somar e consolidar todos os registros duplicados (mesmo item e mesmo endereço) em um único registro. Deseja continuar?')) return;
+
+                consolidateStockBtn.disabled = true;
+                consolidateStockBtn.textContent = 'Consolidando...';
+
+                try {
+                    // Agrupar por chave "itemCode|address"
+                    const groups = {};
+                    allStockLocationsDocs.forEach(d => {
+                        const data = d.data();
+                        const key = `${data.itemCode}||${(data.address || '').replace(/\s+/g, ' ').trim()}`;
+                        if (!groups[key]) groups[key] = [];
+                        groups[key].push(d);
+                    });
+
+                    let merged = 0;
+                    const batch = writeBatch(secondaryDb);
+
+                    for (const key of Object.keys(groups)) {
+                        const docs = groups[key];
+                        if (docs.length < 2) continue; // sem duplicata
+
+                        const totalQty = docs.reduce((sum, d) => sum + (d.data().quantity || 0), 0);
+                        // Manter o primeiro documento com a soma total
+                        batch.update(getStockDocRef(docs[0]), { quantity: totalQty });
+                        // Excluir os demais
+                        for (let i = 1; i < docs.length; i++) {
+                            batch.delete(getStockDocRef(docs[i]));
+                        }
+                        merged++;
+                    }
+
+                    if (merged === 0) {
+                        alert('Nenhuma duplicata encontrada. O estoque já está consolidado.');
+                    } else {
+                        await batch.commit();
+                        alert(`Consolidação concluída! ${merged} grupo(s) de duplicatas foram somados.`);
+                    }
+                } catch (err) {
+                    console.error('Erro ao consolidar estoque:', err);
+                    alert('Erro ao consolidar: ' + err.message);
+                } finally {
+                    consolidateStockBtn.disabled = false;
+                    consolidateStockBtn.textContent = 'Consolidar Duplicatas';
+                }
+            });
         }
         requesterSelect.addEventListener('change', () => {
             const opt = requesterSelect.options[requesterSelect.selectedIndex];
