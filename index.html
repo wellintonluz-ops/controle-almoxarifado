@@ -6,322 +6,394 @@
     <title>Controle de Almoxarifado e Estoque</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%232563eb'/%3E%3Cpath d='M16 22h32v20H16z' fill='white'/%3E%3Cpath d='M22 28h20v2H22zm0 5h20v2H22zm0 5h12v2H22z' fill='%232563eb'/%3E%3C/svg%3E">
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     <style>
+        :root {
+            --ink-900: #0f172a;
+            --ink-700: #334155;
+            --ink-500: #64748b;
+            --ink-400: #94a3b8;
+            --line-200: #e2e8f0;
+            --line-300: #cbd5e1;
+            --bg-app: #eef1f6;
+            --surface: #ffffff;
+            --brand-600: #2452e8;
+            --brand-700: #1c3fc4;
+            --brand-50: #eef2ff;
+            --amber-600: #d97706;
+            --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 24px -14px rgba(15, 23, 42, 0.16);
+            --shadow-card-lg: 0 2px 4px rgba(15, 23, 42, 0.05), 0 20px 40px -18px rgba(15, 23, 42, 0.22);
+        }
+
+        * { scrollbar-width: thin; scrollbar-color: var(--line-300) transparent; }
+        ::-webkit-scrollbar { height: 8px; width: 8px; }
+        ::-webkit-scrollbar-thumb { background: var(--line-300); border-radius: 99px; }
+
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #f3f4f6;
+            background-color: var(--bg-app);
+            background-image:
+                radial-gradient(circle at 0% 0%, rgba(36, 82, 232, 0.06), transparent 45%),
+                radial-gradient(circle at 100% 0%, rgba(217, 119, 6, 0.05), transparent 40%);
+            background-attachment: fixed;
+            color: var(--ink-900);
         }
+
+        :focus-visible {
+            outline: 2px solid var(--brand-600);
+            outline-offset: 2px;
+            border-radius: 4px;
+        }
+
+        /* ---------- Top bar ---------- */
+        #topbar {
+            position: sticky;
+            top: 0;
+            z-index: 40;
+            background: rgba(255, 255, 255, 0.86);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--line-200);
+        }
+        .brand-mark {
+            width: 2.5rem;
+            height: 2.5rem;
+            border-radius: 0.85rem;
+            background: linear-gradient(155deg, var(--brand-600), #1530a0);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 8px 16px -8px rgba(36, 82, 232, 0.55);
+            flex-shrink: 0;
+        }
+
+        /* ---------- Tab navigation ---------- */
+        #nav-scroll {
+            overflow-x: auto;
+            overflow-y: hidden;
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        #nav-scroll::-webkit-scrollbar { display: none; }
+        .tab {
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            white-space: nowrap;
+            padding: 0.55rem 0.95rem;
+            margin: 0.5rem 0.2rem;
+            border-radius: 0.65rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--ink-500);
+            border: 1px solid transparent;
+            transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+        }
+        .tab svg { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.75; }
+        .tab:hover { color: var(--ink-900); background-color: rgba(36, 82, 232, 0.06); }
+        .tab-active, .tab-active:hover {
+            color: var(--brand-700);
+            background-color: var(--brand-50);
+            border-color: rgba(36, 82, 232, 0.18);
+            font-weight: 600;
+        }
+        .tab-active svg { opacity: 1; }
+
+        /* ---------- Generic surfaces ---------- */
+        .surface-card {
+            background-color: var(--surface);
+            border: 1px solid var(--line-200);
+            border-radius: 1rem;
+            box-shadow: var(--shadow-card);
+        }
+        #app h2.text-xl, #app h3.text-lg {
+            letter-spacing: -0.01em;
+        }
+
+        /* ---------- Status / badges ---------- */
         .status-badge {
             padding: 0.25rem 0.75rem;
             border-radius: 9999px;
-            font-size: 0.75rem;
-            font-weight: 600;
+            font-size: 0.7rem;
+            font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.06em;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+        .status-badge::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: currentColor;
         }
         .status-pendente { background-color: #fef3c7; color: #92400e; }
         .status-rejeitado { background-color: #fee2e2; color: #991b1b; }
         .status-entregue { background-color: #dbeafe; color: #1e40af; }
-        .modal-backdrop {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-            display: flex; justify-content: center; align-items: center; z-index: 50;
+        .status-ativo { background-color: #d1fae5; color: #065f46; }
+        .status-inativo { background-color: #f1f5f9; color: #64748b; }
+
+        /* ---------- Buttons ---------- */
+        .btn-primary {
+            background-color: var(--brand-600);
+            color: white;
+            transition: background-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
         }
-        .modal-content {
-            background-color: white; padding: 2rem; border-radius: 0.5rem;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-            width: 90%; max-width: 500px;
-        }
-        .btn-primary { background-color: #2563eb; color: white; transition: background-color 0.3s; }
-        .btn-primary:hover { background-color: #1d4ed8; }
-        .btn-primary:disabled { background-color: #9ca3af; cursor: not-allowed; }
-        .btn-secondary { background-color: #6b7280; color: white; transition: background-color 0.3s; }
-        .btn-secondary:hover { background-color: #4b5563; }
-        .btn-secondary:disabled { background-color: #9ca3af; cursor: not-allowed; }
-        .btn-danger { background-color: #dc2626; color: white; transition: background-color 0.3s; }
+        .btn-primary:hover { background-color: var(--brand-700); }
+        .btn-primary:active { transform: translateY(1px); }
+        .btn-primary:disabled { background-color: #b8c0cc; cursor: not-allowed; box-shadow: none; }
+        .btn-secondary { background-color: #475569; color: white; transition: background-color 0.15s ease, transform 0.1s ease; }
+        .btn-secondary:hover { background-color: #334155; }
+        .btn-secondary:active { transform: translateY(1px); }
+        .btn-secondary:disabled { background-color: #b8c0cc; cursor: not-allowed; }
+        .btn-danger { background-color: #dc2626; color: white; transition: background-color 0.15s ease, transform 0.1s ease; }
         .btn-danger:hover { background-color: #b91c1c; }
+        .btn-danger:active { transform: translateY(1px); }
+
         .loader {
-            border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%;
-            width: 40px; height: 40px; animation: spin 1s linear infinite;
+            border: 3px solid #e2e8f0; border-top: 3px solid var(--brand-600); border-radius: 50%;
+            width: 28px; height: 28px; animation: spin 0.8s linear infinite;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        @keyframes blink-red {
-            0%, 100% { background-color: #dc2626; opacity: 1; }
-            50% { background-color: #b91c1c; opacity: 0.6; }
+
+        /* ---------- Aviso / alert banner ---------- */
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.45; transform: scale(0.85); }
         }
         .aviso-piscante {
-            animation: blink-red 1s ease-in-out infinite;
-            background-color: #dc2626;
-            color: #ffffff;
-            border-radius: 0.375rem;
-            padding: 0.75rem 1rem;
-            font-weight: 600;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.65rem;
+            background-color: #fffbeb;
+            border: 1px solid #fcd34d;
+            color: #78350f;
+            border-radius: 0.75rem;
+            padding: 0.85rem 1.1rem;
+            font-weight: 500;
             font-size: 0.875rem;
-            line-height: 1.5;
-            margin-bottom: 1rem;
-            text-align: center;
+            line-height: 1.55;
+            margin-bottom: 1.25rem;
         }
-        .hidden { display: none; }
-        .tab {
-            cursor: pointer; padding: 0.75rem 1.5rem;
-            border-bottom: 2px solid transparent; transition: all 0.3s;
+        .aviso-piscante .aviso-dot {
+            flex-shrink: 0;
+            margin-top: 0.3rem;
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background-color: var(--amber-600);
+            animation: pulse-dot 1.6s ease-in-out infinite;
         }
-        .tab-active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
-        .stock-low { background-color: #fef9c3; } /* Amarelo claro para estoque baixo */
+
+        .hidden { display: none !important; }
+
+        .stock-low { background-color: #fef9c3; }
+
+        /* ---------- Modals ---------- */
+        @keyframes modal-pop {
+            from { opacity: 0; transform: translateY(8px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .modal-backdrop {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(15, 23, 42, 0.55);
+            backdrop-filter: blur(2px);
+            display: flex; justify-content: center; align-items: center; z-index: 50;
+            padding: 1rem;
+        }
+        .modal-content {
+            background-color: white; padding: 1.75rem; border-radius: 1rem;
+            box-shadow: var(--shadow-card-lg);
+            width: 100%; max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+            animation: modal-pop 0.18s ease-out;
+        }
+
+        /* ---------- Kanban ---------- */
         .kanban-board {
             display: flex;
-            gap: 1.5rem;
+            gap: 1.25rem;
             overflow-x: auto;
-            padding: 1.5rem;
-            min-height: calc(100vh - 250px);
+            padding: 0.25rem 0.25rem 1.5rem;
+            min-height: calc(100vh - 320px);
         }
         .kanban-column {
             flex: 1 0 320px;
             max-width: 350px;
             min-height: 400px;
+            background-color: #eef1f6 !important;
+            border: 1px solid var(--line-200);
         }
-        .kanban-card {
+        #kanban-board .kanban-card {
             cursor: grab;
             user-select: none;
             touch-action: none;
             -webkit-user-drag: element;
+            border-color: var(--line-200);
+            transition: box-shadow 0.15s ease, transform 0.15s ease;
         }
-        .kanban-card:active {
-            cursor: grabbing;
+        #kanban-board .kanban-card:hover {
+            box-shadow: var(--shadow-card);
+            transform: translateY(-1px);
         }
-        .dragging {
-            opacity: 0.5;
-            transform: rotate(2deg);
-            transition: opacity 0.2s, transform 0.2s;
-        }
+        .kanban-card:active { cursor: grabbing; }
+        .dragging { opacity: 0.5; transform: rotate(2deg); transition: opacity 0.2s, transform 0.2s; }
         .drag-over {
             border-style: dashed;
-            border-color: #4f46e5;
-            background-color: rgba(79, 70, 229, 0.05);
+            border-color: var(--brand-600);
+            background-color: rgba(36, 82, 232, 0.05) !important;
             transition: all 0.2s;
         }
-        .hidden-from-screen {
-            position: absolute;
-            left: -9999px;
-            top: auto;
-            width: 1px;
-            height: 1px;
-            overflow: hidden;
-        }
-        .item-search-container {
-            position: relative;
-        }
+
+        .hidden-from-screen { position: absolute; left: -9999px; top: auto; width: 1px; height: 1px; overflow: hidden; }
+
+        /* ---------- Item search dropdown ---------- */
+        .item-search-container { position: relative; }
         .item-search-dropdown {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            max-height: 200px;
-            overflow-y: auto;
-            background: white;
-            border: 1px solid #d1d5db;
-            border-top: none;
-            border-radius: 0 0 0.375rem 0.375rem;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-            z-index: 10;
-            display: none;
+            position: absolute; top: 100%; left: 0; right: 0;
+            max-height: 220px; overflow-y: auto;
+            background: white; border: 1px solid var(--line-200); border-top: none;
+            border-radius: 0 0 0.65rem 0.65rem;
+            box-shadow: var(--shadow-card-lg);
+            z-index: 10; display: none;
         }
-        .item-search-dropdown.active {
-            display: block;
+        .item-search-dropdown.active { display: block; }
+        .item-search-option { padding: 0.55rem 0.85rem; cursor: pointer; transition: background-color 0.1s; }
+        .item-search-option:hover { background-color: #f1f5f9; }
+        .item-search-option.selected { background-color: var(--brand-50); }
+        .item-search-option-code { font-family: 'IBM Plex Mono', monospace; font-weight: 600; color: var(--ink-900); font-size: 0.85rem; }
+        .item-search-option-desc { font-size: 0.85rem; color: var(--ink-500); }
+        .item-inactive { background-color: #f8fafc; opacity: 0.6; }
+
+        /* ---------- Code / SKU monospace styling (signature touch) ---------- */
+        .code-chip, #productCodeInput, #item-code, #edit-item-code,
+        #selected-item-code, #edit-stock-item-code,
+        #items-list td:nth-child(1), #stock-list td:nth-child(1),
+        #catalog-grid h3 {
+            font-family: 'IBM Plex Mono', monospace;
+            letter-spacing: 0.01em;
         }
-        .item-search-option {
-            padding: 0.5rem 0.75rem;
-            cursor: pointer;
-            transition: background-color 0.15s;
-        }
-        .item-search-option:hover {
-            background-color: #f3f4f6;
-        }
-        .item-search-option.selected {
-            background-color: #dbeafe;
-        }
-        .item-search-option-code {
-            font-weight: 600;
-            color: #1f2937;
-        }
-        .item-search-option-desc {
-            font-size: 0.875rem;
-            color: #6b7280;
-        }
-        .item-inactive {
-            background-color: #f3f4f6;
-            opacity: 0.6;
-        }
-        .status-ativo { 
-            background-color: #d1fae5; 
-            color: #065f46; 
-        }
-        .status-inativo { 
-            background-color: #f3f4f6; 
-            color: #6b7280; 
-        }
+        #items-list td:nth-child(1), #stock-list td:nth-child(1) { font-weight: 600; color: var(--ink-900); }
+
         .label-preview-container {
-            width: 500px;
-            height: 150px;
-            border: 2px dashed #9ca3af;
-            padding: 10px;
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            align-items: center;
+            width: 500px; max-width: 100%; height: 150px;
+            border: 2px dashed var(--line-300);
+            border-radius: 0.75rem;
+            padding: 10px; box-sizing: border-box;
+            display: flex; flex-direction: column; justify-content: space-between; align-items: center;
+            background-color: #fafbfc;
         }
+        .product-code { font-size: 1.1rem; font-weight: bold; text-align: center; font-family: 'IBM Plex Mono', monospace; }
+        .product-description { font-size: 1rem; text-align: center; }
 
-        .product-code {
-            font-size: 1.1rem;
-            font-weight: bold;
-            text-align: center;
-        }
-
-        .product-description {
-            font-size: 1rem;
-            text-align: center;
-        }
-
-        #barcode {
-            width: 100%;
-            height: 60px;
-        }
+        #barcode { width: 100%; height: 60px; }
 
         @media print {
-            body * {
-                visibility: hidden;
-            }
-            #print-area, #print-area * {
-                visibility: visible;
-            }
-            #print-area {
-                position: absolute;
-                left: 0;
-                top: 0;
-                width: 100%;
-            }
-            .hidden-from-screen {
-                position: static;
-                width: auto;
-                height: auto;
-                overflow: visible;
-            }
-
+            body * { visibility: hidden; }
+            #print-area, #print-area * { visibility: visible; }
+            #print-area { position: absolute; left: 0; top: 0; width: 100%; }
+            .hidden-from-screen { position: static; width: auto; height: auto; overflow: visible; }
             .label-print {
-                padding: 2mm;
-                box-sizing: border-box;
-                display: flex;
-                flex-direction: column;
-                justify-content: space-around;
-                align-items: center;
-                overflow: hidden;
-                page-break-after: always;
+                padding: 2mm; box-sizing: border-box; display: flex; flex-direction: column;
+                justify-content: space-around; align-items: center; overflow: hidden; page-break-after: always;
             }
-
             .replicated-content {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                width: 100%;
-                height: 3cm; /* Garante que cada bloco replicado tenha 3cm de altura */
-                justify-content: space-around;
-                box-sizing: border-box;
-                padding: 1mm 0;
+                display: flex; flex-direction: column; align-items: center; width: 100%;
+                height: 3cm; justify-content: space-around; box-sizing: border-box; padding: 1mm 0;
             }
-            
-            .replicated-content .product-code {
-                font-size: 12pt;
-                font-weight: bold;
-                text-align: center;
-            }
-            .replicated-content .product-description {
-                font-size: 10pt;
-                text-align: center;
-            }
-            .replicated-content .barcode-svg-print {
-                height: 1.2cm;
-                width: 8cm;
-            }
-            
-            /* Tamanhos Físicos da Etiqueta */
+            .replicated-content .product-code { font-size: 12pt; font-weight: bold; text-align: center; }
+            .replicated-content .product-description { font-size: 10pt; text-align: center; }
+            .replicated-content .barcode-svg-print { height: 1.2cm; width: 8cm; }
             .label-print.size-10x3 { width: 10cm; height: 3cm; }
             .label-print.size-10x8 { width: 10cm; height: 8cm; }
             .label-print.size-15x10 { width: 15cm; height: 10cm; }
-            
-            /* Ajuste para o conteúdo não esticar na etiqueta de 15cm */
-            .label-print.size-15x10 .replicated-content {
-                max-width: 10cm;
-            }
+            .label-print.size-15x10 .replicated-content { max-width: 10cm; }
         }
-        
-        /* Modal de Imagem Ampliada */
+
+        /* ---------- Image modal ---------- */
         .image-modal {
-            display: none;
-            position: fixed;
-            z-index: 9999;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.9);
-            cursor: zoom-out;
+            display: none; position: fixed; z-index: 9999; left: 0; top: 0; width: 100%; height: 100%;
+            background-color: rgba(15, 23, 42, 0.92); cursor: zoom-out;
         }
-        
-        .image-modal.active {
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        .image-modal.active { display: flex; align-items: center; justify-content: center; }
+        .image-modal img { max-width: 90%; max-height: 90%; object-fit: contain; box-shadow: 0 0 50px rgba(0, 0, 0, 0.5); border-radius: 0.5rem; }
+        .catalog-img { cursor: zoom-in; transition: transform 0.2s ease; }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
         }
-        
-        .image-modal img {
-            max-width: 90%;
-            max-height: 90%;
-            object-fit: contain;
-            box-shadow: 0 0 50px rgba(0, 0, 0, 0.5);
+
+        /* ---------- Global polish (kept high-specificity so it reliably wins over Tailwind utilities regardless of injection order) ---------- */
+        html body [class*="rounded-md"] { border-radius: 0.6rem; }
+        html body input[type="text"], html body input[type="number"],
+        html body input[type="password"], html body select, html body textarea {
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
-        
-        .catalog-img {
-            cursor: zoom-in;
+        html body input[type="text"]:focus, html body input[type="number"]:focus,
+        html body input[type="password"]:focus, html body select:focus, html body textarea:focus {
+            box-shadow: 0 0 0 3px rgba(36, 82, 232, 0.14);
         }
+        html body code { font-family: 'IBM Plex Mono', monospace; font-size: 0.8em; }
+
+        table thead.bg-gray-50 {
+            background: linear-gradient(to bottom, #f8fafc, #f1f5f9);
+            border-bottom: 1px solid var(--line-200);
+        }
+        table thead.bg-gray-50 th { color: var(--ink-500); font-weight: 600; }
+        tbody tr { transition: background-color 0.12s ease; }
+        tbody tr:hover { background-color: #f8fafc; }
     </style>
 </head>
 <body class="antialiased text-gray-800">
 
+    <header id="topbar">
+        <div class="max-w-[1600px] mx-auto px-4 md:px-8 py-3 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+                <div class="brand-mark" aria-hidden="true">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5 12 3l9 4.5-9 4.5-9-4.5Z"/><path d="M3 7.5v9L12 21l9-4.5v-9"/><path d="M12 12v9"/></svg>
+                </div>
+                <div class="min-w-0">
+                    <h1 class="text-base md:text-xl font-extrabold text-slate-900 tracking-tight truncate">Controle de Almoxarifado e Estoque</h1>
+                    <p class="hidden sm:block text-xs md:text-sm text-slate-500 truncate">Requisições, cadastros e estoque, integrados em um só lugar.</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 md:gap-3 flex-shrink-0">
+                <div id="firebase-status" class="text-xs font-medium px-3 py-1.5 rounded-full hidden">Conectando ao Firebase...</div>
+                <a id="gestao-recebimento-btn" href="https://wellintonluz-ops.github.io/gestao-containers/" target="_blank" class="btn-primary font-semibold py-2 px-4 rounded-lg shadow-sm hidden text-sm whitespace-nowrap">Gestão de recebimento importação</a>
+                <button id="login-logout-btn" class="btn-primary font-semibold py-2 px-4 rounded-lg shadow-sm text-sm">Login</button>
+            </div>
+        </div>
+        <div id="nav-scroll" class="border-t border-slate-100">
+            <div class="max-w-[1600px] mx-auto px-2 md:px-6">
+                <nav class="flex items-center" aria-label="Tabs">
+                    <button id="tab-dashboard" class="tab hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10"/><path d="M11 19V5"/><path d="M18 19v-7"/></svg>Dashboard</button>
+                    <button id="tab-requisitions" class="tab tab-active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3.5h6v2H9z"/><path d="M8 11h8M8 15h5"/></svg>Requisições</button>
+                    <button id="tab-stock" class="tab hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5 12 3l9 4.5-9 4.5-9-4.5Z"/><path d="M3 7.5v9L12 21l9-4.5v-9"/><path d="M12 12v9"/></svg>Estoque</button>
+                    <button id="tab-kanban" class="tab hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M9 4v16M15 4v16"/></svg>Equipamentos</button>
+                    <button id="tab-labels" class="tab hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12.5 2H20a2 2 0 0 1 2 2v7.5L12.5 21 3 11.5Z"/><circle cx="16" cy="7" r="1.4" fill="currentColor" stroke="none"/></svg>Etiquetas</button>
+                    <button id="tab-items" class="tab hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 7.5 12 3 3 7.5l9 4.5 9-4.5Z"/><path d="M3 7.5v9L12 21l9-4.5v-9"/><path d="M12 12v9"/></svg>Itens</button>
+                    <button id="tab-employees" class="tab hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7.5" r="3"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16.5 5.5a3 3 0 0 1 0 5.9"/><path d="M19 14.2a6.4 6.4 0 0 1 3 5.3"/></svg>Funcionários</button>
+                    <button id="tab-catalog" class="tab hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.3"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="1.3"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.3"/><rect x="13" y="13" width="7.5" height="7.5" rx="1.3"/></svg>Catálogo</button>
+                </nav>
+            </div>
+        </div>
+    </header>
+
     <div id="app" class="container mx-auto p-4 md:p-8 max-w-full relative">
-
-        <header class="mb-8">
-            <h1 class="text-3xl font-bold text-gray-900">Controle de Almoxarifado e Estoque</h1>
-            <p class="text-gray-600 mt-1">Gerencie requisições, cadastros e o estoque de forma integrada.</p>
-        </header>
-
-        <div class="absolute top-4 right-4 md:top-8 md:right-8 flex gap-2">
-            <a id="gestao-recebimento-btn" href="https://wellintonluz-ops.github.io/gestao-containers/" target="_blank" class="btn-primary font-semibold py-2 px-4 rounded-md shadow-sm hidden">Gestão de recebimento importação</a>
-            <button id="login-logout-btn" class="btn-primary font-semibold py-2 px-4 rounded-md shadow-sm">Login</button>
-        </div>
-        <div id="firebase-status" class="absolute top-14 right-4 md:top-20 md:right-8 text-xs px-3 py-1 rounded-md bg-blue-100 text-blue-800 hidden">Conectando ao Firebase...</div>
-
-        <!-- Abas de Navegação -->
-        <div class="border-b border-gray-200 mb-8">
-            <nav class="flex flex-wrap space-x-2" aria-label="Tabs">
-                <button id="tab-dashboard" class="tab hidden">Dashboard</button>
-                <button id="tab-requisitions" class="tab tab-active">Requisições</button>
-                <button id="tab-stock" class="tab hidden">Estoque</button>
-                <button id="tab-kanban" class="tab hidden">Controle de Equipamentos</button>
-                <button id="tab-labels" class="tab hidden">Gerar Etiquetas</button>
-                <button id="tab-items" class="tab hidden">Cadastro de Itens</button>
-                <button id="tab-employees" class="tab hidden">Cadastro de Funcionários</button>
-                <button id="tab-catalog" class="tab hidden">Catálogo de Produtos</button>
-            </nav>
-        </div>
         
         <!-- Conteúdo da Aba Dashboard -->
         <div id="view-dashboard" class="hidden">
-            <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+            <div class="surface-card p-6 mb-6">
                 <div class="flex items-center justify-between">
                     <div>
                         <h3 class="text-lg font-semibold">Tempo médio de atendimento</h3>
@@ -335,7 +407,7 @@
             </div>
 
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <div class="bg-white p-6 rounded-lg shadow-md">
+                <div class="surface-card p-6">
                     <h2 class="text-xl font-semibold mb-4">Consumo Mensal por Item</h2>
                     <div class="mb-6 max-w-xs">
                         <label for="monthly-item-select" class="block text-sm font-medium text-gray-700">Selecione o Item</label>
@@ -351,7 +423,7 @@
                     </div>
                 </div>
 
-                <div class="bg-white p-6 rounded-lg shadow-md">
+                <div class="surface-card p-6">
                     <div class="flex items-center justify-between mb-4">
                         <div>
                             <h2 class="text-xl font-semibold">Requisições por Mês</h2>
@@ -370,7 +442,7 @@
                 </div>
             </div>
 
-            <div class="bg-white p-6 rounded-lg shadow-md mt-6">
+            <div class="surface-card p-6 mt-6">
                 <div class="flex items-center justify-between mb-4">
                     <div>
                         <h3 class="text-lg font-semibold">Requisições por Dia (mês selecionado)</h3>
@@ -387,9 +459,9 @@
 
         <!-- Conteúdo da Aba Requisições -->
         <div id="view-requisitions">
-            <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+            <div class="surface-card p-6 mb-8">
                 <h2 class="text-xl font-semibold mb-4">Criar Nova Requisição</h2>
-                <div class="aviso-piscante">⚠️ Requisições realizadas até às 10h serão atendidas no mesmo dia. Após esse horário, o atendimento poderá ocorrer no próximo dia útil.<br><br>Pedimos que as áreas se planejem com antecedência, evitando solicitações de última hora. Não nos responsabilizamos por processos parados devido à falta de materiais de fácil controle interno da área.</div>
+                <div class="aviso-piscante"><span class="aviso-dot"></span><span>Requisições realizadas até às 10h serão atendidas no mesmo dia. Após esse horário, o atendimento poderá ocorrer no próximo dia útil.<br><br>Pedimos que as áreas se planejem com antecedência, evitando solicitações de última hora. Não nos responsabilizamos por processos parados devido à falta de materiais de fácil controle interno da área.</span></div>
                 <form id="requisition-form" class="grid grid-cols-1 md:grid-cols-6 gap-6">
                     <div class="md:col-span-3"><label for="requester-select" class="block text-sm font-medium text-gray-700">Solicitante</label><select id="requester-select" name="requester" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"><option value="">Selecione um funcionário...</option></select></div>
                     <div class="md:col-span-3"><label for="department" class="block text-sm font-medium text-gray-700">Departamento</label><input type="text" id="department" name="department" readonly class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 focus:outline-none sm:text-sm"></div>
@@ -400,7 +472,7 @@
                     <div class="md:col-span-6 text-right"><button type="submit" class="btn-primary font-semibold py-2 px-6 rounded-md shadow-sm" disabled>Enviar Requisição</button></div>
                 </form>
             </div>
-            <div class="bg-white p-6 rounded-lg shadow-md">
+            <div class="surface-card p-6">
                 <div class="flex justify-between items-center mb-4">
                     <div class="flex items-center space-x-3">
                         <h2 class="text-xl font-semibold">Lista de Requisições</h2>
@@ -430,7 +502,7 @@
         <div id="view-stock" class="hidden">
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div class="lg:col-span-2">
-                    <div class="bg-white p-6 rounded-lg shadow-md">
+                    <div class="surface-card p-6">
                         <div class="flex justify-between items-center mb-4">
                             <h2 class="text-xl font-semibold">Painel de Estoque por Endereço</h2>
                             <div class="flex items-center gap-3">
@@ -468,7 +540,7 @@
                     </div>
                 </div>
                 <div class="lg:col-span-1">
-                     <div class="bg-white p-6 rounded-lg shadow-md">
+                     <div class="surface-card p-6">
                         <h2 class="text-xl font-semibold mb-4">Entrada Manual no Estoque</h2>
                         <form id="stock-entry-form">
                             <div class="mb-4">
@@ -507,7 +579,7 @@
                      </div>
                      
                      <!-- Transferência de Estoque -->
-                     <div class="bg-white p-6 rounded-lg shadow-md mt-8">
+                     <div class="surface-card p-6 mt-8">
                         <h2 class="text-xl font-semibold mb-4">Transferência de Estoque</h2>
                         <form id="stock-transfer-form">
                             <div class="mb-4">
@@ -540,7 +612,7 @@
                      </div>
 
                      <!-- Baixa de Estoque -->
-                     <div class="bg-white p-6 rounded-lg shadow-md mt-8">
+                     <div class="surface-card p-6 mt-8">
                         <h2 class="text-xl font-semibold mb-4">Baixa de Estoque</h2>
                         <form id="stock-out-form">
                             <div class="mb-4">
@@ -573,44 +645,49 @@
 
         <!-- Conteúdo da Aba Kanban -->
         <div id="view-kanban" class="hidden">
-            <div class="flex justify-end p-4">
-                 <button id="add-equipment-btn" class="bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-indigo-700 transition-colors">
-                    + Adicionar Equipamento
+            <div class="flex items-center justify-between p-4 flex-wrap gap-3">
+                <div>
+                    <h2 class="text-xl font-semibold text-slate-900">Controle de Equipamentos</h2>
+                    <p class="text-sm text-slate-500">Arraste os cartões entre as colunas para atualizar o status.</p>
+                </div>
+                <button id="add-equipment-btn" class="bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg shadow-sm hover:bg-indigo-700 transition-colors text-sm inline-flex items-center gap-2">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                    Adicionar Equipamento
                 </button>
             </div>
             <main id="kanban-board" class="kanban-board">
                 <!-- Coluna Disponível -->
-                <div id="disponivel" class="kanban-column bg-gray-200 rounded-lg p-4 shadow">
-                    <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
-                        <span class="w-3 h-3 bg-green-500 rounded-full"></span>
+                <div id="disponivel" class="kanban-column rounded-xl p-4 shadow-sm" style="border-top:3px solid #22c55e">
+                    <h2 class="text-sm font-bold mb-4 flex items-center gap-2 uppercase tracking-wide text-slate-600">
+                        <span class="w-2.5 h-2.5 bg-green-500 rounded-full"></span>
                         Disponível
                     </h2>
-                    <div class="kanban-cards space-y-4 min-h-[200px]"></div>
+                    <div class="kanban-cards space-y-3 min-h-[200px]"></div>
                 </div>
 
                 <!-- Coluna Em Uso -->
-                <div id="em-uso" class="kanban-column bg-gray-200 rounded-lg p-4 shadow">
-                    <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
-                        <span class="w-3 h-3 bg-yellow-500 rounded-full"></span>
+                <div id="em-uso" class="kanban-column rounded-xl p-4 shadow-sm" style="border-top:3px solid #eab308">
+                    <h2 class="text-sm font-bold mb-4 flex items-center gap-2 uppercase tracking-wide text-slate-600">
+                        <span class="w-2.5 h-2.5 bg-yellow-500 rounded-full"></span>
                         Em Uso
                     </h2>
-                    <div class="kanban-cards space-y-4 min-h-[200px]"></div>
+                    <div class="kanban-cards space-y-3 min-h-[200px]"></div>
                 </div>
 
                 <!-- Coluna Em Manutenção -->
-                <div id="em-manutencao" class="kanban-column bg-gray-200 rounded-lg p-4 shadow">
-                    <h2 class="text-lg font-bold mb-4 flex items-center gap-2">
-                        <span class="w-3 h-3 bg-red-500 rounded-full"></span>
+                <div id="em-manutencao" class="kanban-column rounded-xl p-4 shadow-sm" style="border-top:3px solid #ef4444">
+                    <h2 class="text-sm font-bold mb-4 flex items-center gap-2 uppercase tracking-wide text-slate-600">
+                        <span class="w-2.5 h-2.5 bg-red-500 rounded-full"></span>
                         Em Manutenção
                     </h2>
-                    <div class="kanban-cards space-y-4 min-h-[200px]"></div>
+                    <div class="kanban-cards space-y-3 min-h-[200px]"></div>
                 </div>
             </main>
         </div>
         
         <!-- Conteúdo da Aba Gerar Etiquetas -->
         <div id="view-labels" class="hidden">
-            <div id="main-content" class="bg-white p-8 rounded-lg shadow-lg w-full max-w-2xl mx-auto">
+            <div id="main-content" class="surface-card p-8 w-full max-w-2xl mx-auto">
                 <h1 class="text-2xl font-bold text-center text-gray-800 mb-2">Gerador de Etiquetas</h1>
                 <p class="text-center text-gray-600 mb-6">Gere uma etiqueta individualmente ou várias a partir de um arquivo.</p>
                 
@@ -703,7 +780,7 @@
 
         <!-- Conteúdo da Aba Cadastro de Itens -->
         <div id="view-items" class="hidden">
-            <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+            <div class="surface-card p-6 mb-8">
                 <h2 class="text-xl font-semibold mb-4">Cadastrar Novo Item</h2>
                 <div class="border-t border-b border-gray-200 py-6 my-6">
                      <h3 class="text-lg font-medium text-gray-800 mb-2">Importar em Lote (Excel)</h3>
@@ -727,7 +804,7 @@
                     <div class="md:col-span-4 text-right"><button type="submit" id="submit-item-btn" class="btn-primary font-semibold py-2 px-6 rounded-md shadow-sm" disabled>Salvar Item</button></div>
                 </form>
             </div>
-            <div class="bg-white p-6 rounded-lg shadow-md">
+            <div class="surface-card p-6">
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-xl font-semibold">Itens Cadastrados (Visão Geral)</h2>
                     <div class="flex items-center gap-4">
@@ -756,7 +833,7 @@
 
         <!-- Conteúdo da Aba Cadastro de Funcionários -->
         <div id="view-employees" class="hidden">
-             <div class="bg-white p-6 rounded-lg shadow-md mb-8">
+             <div class="surface-card p-6 mb-8">
                 <h2 class="text-xl font-semibold mb-4">Cadastrar Novo Funcionário</h2>
                 <form id="employee-form" class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div><label for="employee-name" class="block text-sm font-medium text-gray-700">Nome do Funcionário</label><input type="text" id="employee-name" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
@@ -764,7 +841,7 @@
                     <div class="md:col-span-2 text-right"><button type="submit" id="submit-employee-btn" class="btn-primary font-semibold py-2 px-6 rounded-md shadow-sm" disabled>Salvar Funcionário</button></div>
                 </form>
             </div>
-            <div class="bg-white p-6 rounded-lg shadow-md">
+            <div class="surface-card p-6">
                 <div class="flex justify-between items-center mb-4"><h2 class="text-xl font-semibold">Funcionários Cadastrados</h2><div id="loading-employees" class="loader hidden"></div></div>
                  <div class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200"><thead class="bg-gray-50"><tr><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nome</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Departamento</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th></tr></thead><tbody id="employees-list" class="bg-white divide-y divide-gray-200"></tbody></table>
@@ -775,7 +852,7 @@
 
         <!-- Conteúdo da Aba Catálogo de Produtos -->
         <div id="view-catalog" class="hidden">
-            <div class="bg-white p-6 rounded-lg shadow-md">
+            <div class="surface-card p-6">
                 <div class="flex justify-between items-center mb-6">
                     <h2 class="text-xl font-semibold">Catálogo de Produtos</h2>
                     <div class="flex gap-4 items-center">
@@ -4227,7 +4304,7 @@
                 const hasPhoto = hasRealPhoto(photoSrc);
                 
                 const card = document.createElement('div');
-                card.className = 'bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow';
+                card.className = 'bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all';
                 card.innerHTML = `
                     <div class="aspect-w-16 aspect-h-9 bg-gray-200 flex items-center justify-center">
                         ${hasPhoto 
@@ -4319,4 +4396,3 @@
     </script>
 </body>
 </html>
-
