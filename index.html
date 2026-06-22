@@ -1016,7 +1016,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, where, runTransaction, writeBatch, getDocs, orderBy, limit, setDoc, increment, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, where, runTransaction, writeBatch, getDocs, orderBy, limit, setDoc, increment, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
         // ************************************************************************************
@@ -1047,11 +1047,15 @@
         // ************************************************************************************
 
         const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+        // Cache persistente (IndexedDB) com suporte a múltiplas abas: depois da primeira carga,
+        // o app abre instantaneamente a partir do cache local e só busca no servidor o que
+        // realmente mudou, em vez de baixar as coleções inteiras de novo a cada sessão.
+        const firestoreCacheOptions = { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) };
+        const db = initializeFirestore(app, firestoreCacheOptions);
         const auth = getAuth(app);
         const storage = getStorage(app);
         const secondaryApp = initializeApp(secondaryFirebaseConfig, 'secondary');
-        const secondaryDb = getFirestore(secondaryApp);
+        const secondaryDb = initializeFirestore(secondaryApp, firestoreCacheOptions);
         const secondaryStorage = getStorage(secondaryApp);
         const secondaryAuth = getAuth(secondaryApp);
         const secondaryAuthInitPromise = new Promise(resolve => {
@@ -2002,9 +2006,8 @@
 
                 isFirestoreReady = true;
 
-                await fetchInitialData();
-                updateUIForAuth();
                 startRealtimeListeners();
+                updateUIForAuth();
                 updateFirebaseStatus('Conectado ao Firebase', 'success', true);
                 setTimeout(() => updateFirebaseStatus('', 'info', false), 1500);
                 return true;
@@ -2019,10 +2022,12 @@
         }
         
         // Debounce para evitar renderizações múltiplas
-        let renderTimeout = null;
-        function debouncedRender(fn, delay = 100) {
-            clearTimeout(renderTimeout);
-            renderTimeout = setTimeout(fn, delay);
+        // Debounce com chave separada por função, para que uma atualização de estoque
+        // não cancele um render de requisição em andamento.
+        const _debounceTimers = new Map();
+        function debouncedRender(key, fn, delay = 180) {
+            clearTimeout(_debounceTimers.get(key));
+            _debounceTimers.set(key, setTimeout(() => { _debounceTimers.delete(key); fn(); }, delay));
         }
 
         async function logMeta(eventType, payload = {}) {
@@ -2057,76 +2062,25 @@
             }
         }
 
-        async function fetchInitialData() {
-            if (!isFirestoreReady) return;
-            try {
-                loadingRequisitions.classList.remove('hidden');
-                loadingEmployees.classList.remove('hidden');
-                loadingItems.classList.remove('hidden');
-                loadingStock.classList.remove('hidden');
-
-                const reqOldSnapPromise = getDocs(requisitionsCollectionPrimary);
-                const reqNewSnapPromise = allowSecondary
-                    ? getDocs(requisitionsCollectionSecondary)
-                    : Promise.resolve({ docs: [] });
-                const stockSecondarySnapPromise = allowSecondaryStock
-                    ? getDocs(stockLocationsSecondaryCollection)
-                    : Promise.resolve({ docs: [] });
-
-                const [reqOldResult, reqNewResult, empResult, itemResult, stockSecondaryResult, kanbanResult] = await Promise.allSettled([
-                    reqOldSnapPromise,
-                    reqNewSnapPromise,
-                    getDocs(getReadCollection(employeesCollection, employeesReadCollection)),
-                    getDocs(getReadCollection(itemsCollection, itemsReadCollection)),
-                    stockSecondarySnapPromise,
-                    getDocs(getReadCollection(kanbanEquipmentsCollection, kanbanEquipmentsReadCollection))
-                ]);
-
-                const getDocsFromResult = (result, label, onError) => {
-                    if (result.status === 'fulfilled') {
-                        return result.value.docs;
-                    }
-
-                    console.warn(`Erro ao carregar ${label}:`, result.reason);
-                    updatePermissionStatus(result.reason);
-                    if (typeof onError === 'function') {
-                        onError(result.reason);
-                    }
-                    return [];
-                };
-
-                oldRequisitionsDocs = getDocsFromResult(reqOldResult, 'requisicoes do projeto principal').map(d => wrapRequisitionDoc(d, 'old'));
-                newRequisitionsDocs = getDocsFromResult(reqNewResult, 'requisicoes do projeto secundario', () => {
-                    allowSecondary = false;
-                }).map(d => wrapRequisitionDoc(d, 'new'));
-                allEmployeesDocs = getDocsFromResult(empResult, 'funcionarios').sort((a, b) => a.data().name.localeCompare(b.data().name));
-                allItemsDocs = getDocsFromResult(itemResult, 'itens').sort((a, b) => a.data().description.localeCompare(b.data().description));
-                allStockLocationsDocs = getDocsFromResult(stockSecondaryResult, 'estoque do projeto secundario').sort((a, b) => (a.data().address || '').localeCompare(b.data().address || ''));
-                allKanbanEquipmentsDocs = getDocsFromResult(kanbanResult, 'equipamentos kanban');
-
-                refreshRequisitionViews();
-                renderEmployees();
-                renderItems();
-                renderStock();
-                populateSelects();
-                populateMonthlyItemSelect();
-                renderKanbanBoard();
-            } catch (error) {
-                console.error('Erro ao carregar dados iniciais:', error);
-            } finally {
-                [loadingRequisitions, loadingEmployees, loadingItems, loadingStock].forEach(l => l.classList.add('hidden'));
-            }
-        }
+        // OBS: a antiga função fetchInitialData() fazia um getDocs() completo de cada coleção
+        // e, em seguida, startRealtimeListeners() assinava onSnapshot() nas MESMAS coleções —
+        // ou seja, todo login baixava cada coleção do Firestore duas vezes. Como o primeiro
+        // evento de um onSnapshot já entrega o estado atual completo (e popula a tela através
+        // dos próprios callbacks abaixo), removemos essa busca duplicada: agora os dados
+        // iniciais chegam por meio do primeiro snapshot de cada listener, sem round-trip extra.
 
         function startRealtimeListeners() {
             if (!isFirestoreReady) return;
 
+            // Requisições primárias — tempo real, debounce curto (200ms)
             if (!unsubRequisitionsPrimary) {
                 loadingRequisitions.classList.remove('hidden');
                 unsubRequisitionsPrimary = onSnapshot(requisitionsCollectionPrimary, s => {
                     oldRequisitionsDocs = s.docs.map(d => wrapRequisitionDoc(d, 'old'));
-                    refreshRequisitionViews();
-                    loadingRequisitions.classList.add('hidden');
+                    debouncedRender('requisitions', () => {
+                        refreshRequisitionViews();
+                        loadingRequisitions.classList.add('hidden');
+                    }, 200);
                 }, err => {
                     console.warn('Snapshot do projeto principal indisponivel:', err);
                     updatePermissionStatus(err);
@@ -2134,33 +2088,36 @@
                 });
             }
 
+            // Requisições secundárias — tempo real, debounce curto
             if (!unsubRequisitionsSecondary && allowSecondary) {
                 loadingRequisitions.classList.remove('hidden');
                 unsubRequisitionsSecondary = onSnapshot(requisitionsCollectionSecondary, s => {
                     newRequisitionsDocs = s.docs.map(d => wrapRequisitionDoc(d, 'new'));
-                    refreshRequisitionViews();
-                    loadingRequisitions.classList.add('hidden');
+                    debouncedRender('requisitions', () => {
+                        refreshRequisitionViews();
+                        loadingRequisitions.classList.add('hidden');
+                    }, 200);
                 }, err => {
                     console.warn('Snapshot secundario indisponivel, mantendo somente o principal:', err);
                     updatePermissionStatus(err);
                     allowSecondary = false;
-                    if (unsubRequisitionsSecondary) {
-                        unsubRequisitionsSecondary();
-                        unsubRequisitionsSecondary = null;
-                    }
+                    if (unsubRequisitionsSecondary) { unsubRequisitionsSecondary(); unsubRequisitionsSecondary = null; }
                     newRequisitionsDocs = [];
-                    refreshRequisitionViews();
-                    loadingRequisitions.classList.add('hidden');
+                    debouncedRender('requisitions', () => { refreshRequisitionViews(); loadingRequisitions.classList.add('hidden'); }, 200);
                 });
             }
 
+            // Funcionários — muda só quando admin edita; debounce maior evita rerender
+            // em lote durante importação
             if (!unsubEmployees) {
                 loadingEmployees.classList.remove('hidden');
                 unsubEmployees = onSnapshot(getReadCollection(employeesCollection, employeesReadCollection), s => {
                     allEmployeesDocs = s.docs.sort((a, b) => a.data().name.localeCompare(b.data().name));
-                    renderEmployees();
-                    populateSelects();
-                    loadingEmployees.classList.add('hidden');
+                    debouncedRender('employees', () => {
+                        renderEmployees();
+                        populateSelects();
+                        loadingEmployees.classList.add('hidden');
+                    }, 400);
                 }, err => {
                     console.warn('Snapshot de funcionarios indisponivel:', err);
                     updatePermissionStatus(err);
@@ -2168,15 +2125,18 @@
                 });
             }
 
+            // Itens — debounce 500ms para absorver rajadas do import em lote
             if (!unsubItems) {
                 loadingItems.classList.remove('hidden');
                 unsubItems = onSnapshot(getReadCollection(itemsCollection, itemsReadCollection), s => {
                     allItemsDocs = s.docs.sort((a, b) => a.data().description.localeCompare(b.data().description));
-                    renderItems();
-                    renderStock();
-                    populateSelects();
-                    populateMonthlyItemSelect();
-                    loadingItems.classList.add('hidden');
+                    debouncedRender('items', () => {
+                        renderItems();
+                        renderStock();
+                        populateSelects();
+                        populateMonthlyItemSelect();
+                        loadingItems.classList.add('hidden');
+                    }, 500);
                 }, err => {
                     console.warn('Snapshot de itens indisponivel:', err);
                     updatePermissionStatus(err);
@@ -2184,13 +2144,16 @@
                 });
             }
 
+            // Estoque — debounce 400ms para absorver ajustes de múltiplos endereços
             if (!unsubStock && allowSecondaryStock) {
                 loadingStock.classList.remove('hidden');
                 unsubStock = onSnapshot(stockLocationsSecondaryCollection, s => {
                     allStockLocationsDocs = s.docs.sort((a, b) => (a.data().address || '').localeCompare(b.data().address || ''));
-                    renderStock();
-                    renderItems();
-                    loadingStock.classList.add('hidden');
+                    debouncedRender('stock', () => {
+                        renderStock();
+                        renderItems();
+                        loadingStock.classList.add('hidden');
+                    }, 400);
                 }, err => {
                     console.warn('Snapshot de estoque do projeto secundario indisponivel:', err);
                     updatePermissionStatus(err);
@@ -2198,10 +2161,11 @@
                 });
             }
 
+            // Kanban — debounce 300ms
             if (!unsubKanban) {
                 unsubKanban = onSnapshot(getReadCollection(kanbanEquipmentsCollection, kanbanEquipmentsReadCollection), s => {
                     allKanbanEquipmentsDocs = s.docs;
-                    renderKanbanBoard();
+                    debouncedRender('kanban', renderKanbanBoard, 300);
                 }, err => {
                     console.warn('Snapshot do kanban indisponivel:', err);
                     updatePermissionStatus(err);
@@ -2277,7 +2241,7 @@
                 paginationDiv.classList.add('hidden');
             }
             
-            paginatedDocs.forEach(doc => {
+            const rowsHtml = paginatedDocs.map(doc => {
                 const data = doc.data();
                 const id = doc.id;
                 const createdDate = getRequisitionCreatedDate(data);
@@ -2286,8 +2250,9 @@
                 const updatedAtText = updatedDate ? updatedDate.toLocaleString('pt-BR') : '-';
                 const itemDisplay = data.itemCode ? `[${data.itemCode}] - ${data.itemDescription}` : data.item;
                 const justification = data.justification ? (data.justification.length > 50 ? `${data.justification.slice(0, 50)}...` : data.justification) : '-';
-                requisitionsListBody.innerHTML += `<tr class="hover:bg-gray-50"><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${date}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${data.requester}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemDisplay}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${data.quantity}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" title="${data.justification || ''}">${justification}</td><td class="px-6 py-4 whitespace-nowrap"><span class="status-badge status-${data.status.toLowerCase()}">${data.status}</span></td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${updatedAtText}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium"><button data-id="${id}" data-status="${data.status}" class="update-status-btn ${!isLoggedIn ? 'text-gray-400 cursor-not-allowed' : 'text-blue-600 hover:text-blue-900'}" ${!isLoggedIn ? 'disabled' : ''}>Alterar</button></td></tr>`;
+                return `<tr class="hover:bg-gray-50"><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${date}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${data.requester}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemDisplay}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${data.quantity}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" title="${data.justification || ''}">${justification}</td><td class="px-6 py-4 whitespace-nowrap"><span class="status-badge status-${data.status.toLowerCase()}">${data.status}</span></td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${updatedAtText}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium"><button data-id="${id}" data-status="${data.status}" class="update-status-btn ${!isLoggedIn ? 'text-gray-400 cursor-not-allowed' : 'text-blue-600 hover:text-blue-900'}" ${!isLoggedIn ? 'disabled' : ''}>Alterar</button></td></tr>`;
             });
+            requisitionsListBody.innerHTML = rowsHtml.join('');
             document.querySelectorAll('.update-status-btn:not([disabled])').forEach(b => b.addEventListener('click', (e) => openStatusModal(e.target)));
             
             // Configurar listeners de paginação (apenas uma vez)
@@ -2325,7 +2290,6 @@
         };
 
         const renderItems = () => {
-            itemsListBody.innerHTML = '';
             noItemsMessage.classList.toggle('hidden', allItemsDocs.length > 0);
             
             // Detectar duplicados
@@ -2349,13 +2313,22 @@
                 const codeB = b.data().code?.toUpperCase() || '';
                 return codeA.localeCompare(codeB);
             });
+
+            // Soma de estoque por código em uma única passada (evita recalcular
+            // a lista inteira de estoque para cada item, que travava a tela
+            // conforme o catálogo crescia).
+            const stockTotalsByCode = new Map();
+            allStockLocationsDocs.forEach(loc => {
+                const locData = loc.data();
+                const code = locData.itemCode;
+                if (!code) return;
+                stockTotalsByCode.set(code, (stockTotalsByCode.get(code) || 0) + (locData.quantity || 0));
+            });
             
-            sortedItems.forEach(doc => {
+            const rowsHtml = sortedItems.map(doc => {
                 const itemData = doc.data();
                 const isActive = itemData.active !== false;
-                const totalStock = allStockLocationsDocs
-                    .filter(loc => loc.data().itemCode === itemData.code)
-                    .reduce((sum, loc) => sum + loc.data().quantity, 0);
+                const totalStock = stockTotalsByCode.get(itemData.code) || 0;
                 
                 const safetyStock = itemData.safetyStock || 0;
                 let stockClass = '';
@@ -2372,8 +2345,9 @@
                 const toggleText = isActive ? 'Inativar' : 'Ativar';
                 const toggleClass = isActive ? 'text-orange-600 hover:text-orange-900' : 'text-green-600 hover:text-green-900';
 
-                itemsListBody.innerHTML += `<tr class="${stockClass}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${itemData.code}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemData.description}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">${safetyStock}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm font-semibold">${totalStock}</td><td class="px-6 py-4 whitespace-nowrap text-center"><span class="status-badge ${statusClass}">${statusText}</span></td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${isLoggedIn ? `<button data-id="${doc.id}" class="edit-item-btn text-blue-600 hover:text-blue-900 mr-4">Editar</button><button data-id="${doc.id}" data-active="${isActive}" class="toggle-item-btn ${toggleClass} mr-4">${toggleText}</button><button data-id="${doc.id}" class="delete-item-btn text-red-600 hover:text-red-900">Excluir</button>`: ''}</td></tr>`;
+                return `<tr class="${stockClass}"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${itemData.code}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${itemData.description}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">${safetyStock}</td><td class="px-6 py-4 whitespace-nowrap text-center text-sm font-semibold">${totalStock}</td><td class="px-6 py-4 whitespace-nowrap text-center"><span class="status-badge ${statusClass}">${statusText}</span></td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${isLoggedIn ? `<button data-id="${doc.id}" class="edit-item-btn text-blue-600 hover:text-blue-900 mr-4">Editar</button><button data-id="${doc.id}" data-active="${isActive}" class="toggle-item-btn ${toggleClass} mr-4">${toggleText}</button><button data-id="${doc.id}" class="delete-item-btn text-red-600 hover:text-red-900">Excluir</button>`: ''}</td></tr>`;
             });
+            itemsListBody.innerHTML = rowsHtml.join('');
             
             document.querySelectorAll('.edit-item-btn').forEach(b => b.addEventListener('click', (e) => openEditItemModal(e.target)));
             document.querySelectorAll('.toggle-item-btn').forEach(b => b.addEventListener('click', async (e) => toggleItemActive(e.target)));
@@ -2381,59 +2355,55 @@
         };
 
         const renderStock = () => {
-            stockListBody.innerHTML = '';
             noStockItems.classList.toggle('hidden', allStockLocationsDocs.length > 0);
             const depotFilter = document.getElementById('stock-depot-filter')?.value || '';
-            
-            // Ordenar por depósito e depois por endereço
-            const getDepot = d => (d.address || '').split(' - ')[0] || '';
-            const getAddr  = d => (d.address || '').split(' - ').slice(1).join(' - ') || (d.address || '');
-            const sortedStock = [...allStockLocationsDocs].sort((a, b) => {
-                const da = a.data(), db = b.data();
-                const depotCmp = getDepot(da).localeCompare(getDepot(db));
-                if (depotCmp !== 0) return depotCmp;
-                return getAddr(da).localeCompare(getAddr(db));
+
+            // Índice O(1): código → doc de item (evita find() por linha)
+            const itemByCode = new Map();
+            allItemsDocs.forEach(d => itemByCode.set(d.data().code, d));
+
+            // Totais por código em uma única passada (evita filter+reduce por linha)
+            const stockTotalsByCode = new Map();
+            allStockLocationsDocs.forEach(loc => {
+                const { itemCode, quantity } = loc.data();
+                if (itemCode) stockTotalsByCode.set(itemCode, (stockTotalsByCode.get(itemCode) || 0) + (quantity || 0));
             });
-            
+
+            // Ordenar por depósito e endereço
+            const getParts = d => {
+                const parts = (d.address || '').split(' - ');
+                return parts.length > 1 ? [parts[0], parts.slice(1).join(' - ')] : ['', d.address || ''];
+            };
+            const sortedStock = [...allStockLocationsDocs].sort((a, b) => {
+                const [da, db2] = [a.data(), b.data()];
+                const [dA] = getParts(da), [dB] = getParts(db2);
+                const cmp = dA.localeCompare(dB);
+                if (cmp !== 0) return cmp;
+                return (getParts(da)[1]).localeCompare(getParts(db2)[1]);
+            });
+
+            const frag = document.createDocumentFragment();
+
             sortedStock.forEach(locDoc => {
                 const locData = locDoc.data();
-                const item = allItemsDocs.find(itemDoc => itemDoc.data().code === locData.itemCode);
-                
-                // Não mostrar itens inativos no estoque
-                if (item && item.data().active === false) {
-                    return;
-                }
-                
-                // Não mostrar itens com quantidade zero
-                if (locData.quantity === 0 || !locData.quantity) {
-                    return;
-                }
+                const item = itemByCode.get(locData.itemCode);
 
-                // Separar depósito e endereço (formato: "Depósito - Endereço")
-                const addrParts = locData.address ? locData.address.split(' - ') : [];
-                const depotLabel = addrParts.length > 1 ? addrParts[0] : '';
-                const addrDisplay = addrParts.length > 1 ? addrParts.slice(1).join(' - ') : (locData.address || '');
+                if (item && item.data().active === false) return;
+                if (!locData.quantity) return;
 
-                // Filtro de depósito
-                if (depotFilter && depotLabel !== depotFilter) {
-                    return;
-                }
-                
-                const description = item ? item.data().description : "Item não encontrado";
-                const safetyStock = item ? (item.data().safetyStock || 0) : 0;
-                const photoSrc = item ? getItemPhotoSource(item.data()) : '';
+                const [depotLabel, addrDisplay] = getParts(locData);
+                if (depotFilter && depotLabel !== depotFilter) return;
 
-                const totalStock = allStockLocationsDocs
-                    .filter(loc => loc.data().itemCode === locData.itemCode)
-                    .reduce((sum, loc) => sum + loc.data().quantity, 0);
+                const itemData = item?.data();
+                const description = itemData?.description ?? 'Item não encontrado';
+                const safetyStock = itemData?.safetyStock ?? 0;
+                const photoSrc = item ? getItemPhotoSource(itemData) : '';
+                const totalStock = stockTotalsByCode.get(locData.itemCode) || 0;
 
                 let stockClass = '';
-                if (totalStock <= safetyStock) {
-                    stockClass = 'bg-red-100 hover:bg-red-200';
-                } else if (totalStock <= safetyStock * 1.25) {
-                    stockClass = 'bg-yellow-100 hover:bg-yellow-200';
-                }
-                
+                if (totalStock <= safetyStock) stockClass = 'bg-red-100 hover:bg-red-200';
+                else if (totalStock <= safetyStock * 1.25) stockClass = 'bg-yellow-100 hover:bg-yellow-200';
+
                 const row = document.createElement('tr');
                 row.className = stockClass;
                 row.innerHTML = `
@@ -2445,19 +2415,14 @@
                     <td class="px-2 py-3 whitespace-nowrap text-center text-lg font-bold">${locData.quantity}</td>
                     <td class="px-2 py-3 whitespace-nowrap text-center text-sm">${isLoggedIn ? `<div class="flex items-center justify-center gap-1"><button class="edit-stock-loc-btn text-blue-600 hover:text-blue-900 font-medium text-xs border border-blue-300 rounded px-2 py-1 hover:bg-blue-50" data-id="${locDoc.id}">Editar</button><button class="delete-stock-loc-btn text-red-600 hover:text-red-900 font-medium text-xs border border-red-300 rounded px-2 py-1 hover:bg-red-50" data-id="${locDoc.id}" data-code="${locData.itemCode}" data-address="${locData.address}">Excluir</button></div>` : ''}</td>
                 `;
-                
-                // Adicionar evento de clique no código se tiver foto
+
                 if (photoSrc) {
-                    const codeCell = row.querySelector('td[data-photo]');
-                    codeCell.addEventListener('click', () => {
-                        const imageModal = document.getElementById('image-modal');
-                        const modalImage = document.getElementById('modal-image');
-                        modalImage.src = photoSrc;
-                        imageModal.classList.add('active');
+                    row.querySelector('td[data-photo]').addEventListener('click', () => {
+                        document.getElementById('modal-image').src = photoSrc;
+                        document.getElementById('image-modal').classList.add('active');
                     });
                 }
 
-                // Botão editar registro individual
                 if (isLoggedIn) {
                     const editBtn = row.querySelector('.edit-stock-loc-btn');
                     if (editBtn) {
@@ -2465,14 +2430,12 @@
                             const stockEntry = getStockEntryById(editBtn.dataset.id);
                             if (!stockEntry) return;
                             const sData = stockEntry.data();
-                            const itemDoc = allItemsDocs.find(d => d.data().code === sData.itemCode);
+                            const itemDoc = itemByCode.get(sData.itemCode);
                             document.getElementById('edit-stock-loc-id').value = stockEntry.id;
                             document.getElementById('edit-stock-item-id').value = itemDoc ? itemDoc.id : '';
                             document.getElementById('edit-stock-item-code').value = sData.itemCode || '';
                             document.getElementById('edit-stock-description').value = itemDoc ? itemDoc.data().description : '';
-                            const addrParts = (sData.address || '').split(' - ');
-                            const depotVal  = addrParts.length > 1 ? addrParts[0] : '';
-                            const addrOnly  = addrParts.length > 1 ? addrParts.slice(1).join(' - ') : (sData.address || '');
+                            const [depotVal, addrOnly] = getParts(sData);
                             document.getElementById('edit-stock-depot').value = depotVal;
                             document.getElementById('edit-stock-address').value = addrOnly;
                             document.getElementById('edit-stock-quantity').value = sData.quantity ?? 0;
@@ -2481,39 +2444,32 @@
                             document.getElementById('edit-stock-modal').classList.remove('hidden');
                         });
                     }
-                }
-
-                // Botão excluir registro individual
-                if (isLoggedIn) {
                     const delBtn = row.querySelector('.delete-stock-loc-btn');
                     if (delBtn) {
                         delBtn.addEventListener('click', async () => {
-                            const code = delBtn.dataset.code;
-                            const address = delBtn.dataset.address;
-                            if (confirm(`Excluir o registro do item "${code}" no endereço "${address}"? Esta ação não pode ser desfeita.`)) {
+                            if (confirm(`Excluir o registro do item "${delBtn.dataset.code}" no endereço "${delBtn.dataset.address}"? Esta ação não pode ser desfeita.`)) {
                                 const stockEntry = getStockEntryById(delBtn.dataset.id);
-                                if (!stockEntry) {
-                                    alert('Registro de estoque não encontrado.');
-                                    return;
-                                }
+                                if (!stockEntry) { alert('Registro de estoque não encontrado.'); return; }
                                 await deleteDoc(getStockDocRef(stockEntry));
                             }
                         });
                     }
                 }
-                
-                stockListBody.appendChild(row);
+                frag.appendChild(row);
             });
+
+            stockListBody.innerHTML = '';
+            stockListBody.appendChild(frag);
         };
         
         const renderEmployees = () => {
-            employeesListBody.innerHTML = '';
             noEmployeesMessage.classList.toggle('hidden', allEmployeesDocs.length > 0);
-            allEmployeesDocs.forEach(doc => {
+            const rowsHtml = allEmployeesDocs.map(doc => {
                 const data = doc.data();
                 const id = doc.id;
-                employeesListBody.innerHTML += `<tr class="hover:bg-gray-50"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${data.name}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${data.department}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${isLoggedIn ? `<button data-id="${id}" class="delete-employee-btn text-red-600 hover:text-red-900">Excluir</button>` : ''}</td></tr>`;
+                return `<tr class="hover:bg-gray-50"><td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${data.name}</td><td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${data.department}</td><td class="px-6 py-4 whitespace-nowrap text-sm font-medium">${isLoggedIn ? `<button data-id="${id}" class="delete-employee-btn text-red-600 hover:text-red-900">Excluir</button>` : ''}</td></tr>`;
             });
+            employeesListBody.innerHTML = rowsHtml.join('');
             document.querySelectorAll('.delete-employee-btn').forEach(b => b.addEventListener('click', async (e) => {
                 if (confirm('Tem certeza que deseja excluir este funcionário?')) {
                     await deleteDoc(doc(employeesCollection, e.target.dataset.id));
@@ -2613,11 +2569,11 @@
                 }
             }
 
-            renderRequisitions();
-            renderItems();
-            renderEmployees();
-            renderStock();
-            renderKanbanBoard();
+            // Apenas requisições precisam ser re-renderizadas aqui, porque o estado
+            // do botão "Alterar" depende de isLoggedIn. As demais tabelas (itens, estoque,
+            // funcionários, kanban) são atualizadas pelos seus próprios snapshot callbacks
+            // e não mudam visualmente com a troca de auth quando os dados já estão carregados.
+            if (isFirestoreReady) renderRequisitions();
         }
 
         // Adicionar event listeners apenas uma vez
