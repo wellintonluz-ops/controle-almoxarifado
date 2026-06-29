@@ -1571,6 +1571,24 @@
             return (str || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
         }
 
+        /**
+         * Chave canônica de endereço para comparação e agrupamento.
+         * Remove TODOS os espaços internos e converte para maiúsculas, de modo
+         * que "ALM. EXT", "ALM.EXT", "alm.ext" e "ALM .EXT" sejam tratados
+         * como o mesmo endereço — evitando duplicatas por diferença de espaçamento.
+         */
+        function canonAddr(addr) {
+            return (addr || '').replace(/\s+/g, '').toUpperCase();
+        }
+
+        /**
+         * Forma de armazenamento canônica: colapsa espaços múltiplos em um único
+         * e remove espaços ao redor de hífen. Usada ao GRAVAR um novo endereço.
+         */
+        function storeAddr(addr) {
+            return (addr || '').replace(/\s+/g, ' ').replace(/\s*-\s*/g, ' - ').trim();
+        }
+
         function matchesRequisitionSearch(data, normalizedTerm) {
             if (!normalizedTerm) return true;
             const haystack = [
@@ -2813,24 +2831,27 @@
                     return;
                 }
                 const itemData = JSON.parse(stockItemSelect.value);
-                const address = (depot ? `${depot} - ${addressRaw}` : addressRaw).replace(/\s+/g, ' ').trim();
+                const rawAddress = (depot ? `${depot} - ${addressRaw}` : addressRaw);
+                const address = storeAddr(rawAddress);   // forma canônica para gravar
+                const addressKey = canonAddr(address);   // chave sem espaços para buscar
                 const quantityToAdd = Number(document.getElementById('stock-entry-quantity').value);
 
-                // Busca diretamente no Firestore para evitar falsos negativos por cache desatualizado
-                let existingLocation = null;
-                try {
-                    const q = query(stockLocationsSecondaryCollection,
-                        where('itemCode', '==', itemData.code),
-                        where('address', '==', address)
-                    );
-                    const snap = await getDocs(q);
-                    if (!snap.empty) existingLocation = snap.docs[0];
-                } catch (_) {
-                    // Fallback para cache local se a query falhar
-                    existingLocation = allStockLocationsDocs.find(d =>
-                        d.data().itemCode === itemData.code &&
-                        (d.data().address || '').replace(/\s+/g, ' ').trim() === address
-                    ) || null;
+                // Primeiro tenta encontrar no cache local usando canonAddr (tolerante a espaços)
+                let existingLocation = allStockLocationsDocs.find(d =>
+                    d.data().itemCode === itemData.code &&
+                    canonAddr(d.data().address) === addressKey
+                ) || null;
+
+                // Se não encontrou no cache, tenta Firestore com o endereço exato e variações
+                if (!existingLocation) {
+                    try {
+                        const q = query(stockLocationsSecondaryCollection,
+                            where('itemCode', '==', itemData.code),
+                            where('address', '==', address)
+                        );
+                        const snap = await getDocs(q);
+                        if (!snap.empty) existingLocation = snap.docs[0];
+                    } catch (_) { /* ignora erro de query, usa cache */ }
                 }
 
                 const existingLocationForUpdate = existingLocation
@@ -2840,7 +2861,11 @@
                 try {
                     if (existingLocationForUpdate) {
                         const newQuantity = (existingLocationForUpdate.data().quantity || 0) + quantityToAdd;
-                        await updateDoc(existingLocationForUpdate.ref || getStockDocRef(existingLocationForUpdate), { quantity: newQuantity });
+                        // Aproveita a atualização para padronizar o endereço gravado
+                        await updateDoc(existingLocationForUpdate.ref || getStockDocRef(existingLocationForUpdate), {
+                            quantity: newQuantity,
+                            address: address   // normaliza o endereço para a forma canônica
+                        });
                         logMeta('stock_entry', {
                             itemCode: itemData.code,
                             address,
@@ -2885,7 +2910,9 @@
                 
                 const itemData = JSON.parse(transferItemSelect.value);
                 const fromLocationId = transferFromAddress.value;
-                const toAddress = transferToAddress.value.trim();
+                const toAddressRaw = transferToAddress.value.trim();
+                const toAddress = storeAddr(toAddressRaw);
+                const toAddressKey = canonAddr(toAddress);
                 const quantityToTransfer = Number(transferQuantity.value);
                 
                 const fromLocation = allStockLocationsDocs.find(doc => doc.id === fromLocationId);
@@ -2908,15 +2935,18 @@
                     const newFromQuantity = currentQuantity - quantityToTransfer;
                     await updateDoc(getStockDocRef(fromLocation), { quantity: newFromQuantity });
                     
-                    // Adicionar ou aumentar quantidade no destino
+                    // Adicionar ou aumentar quantidade no destino (busca tolerante a espaços)
                     const existingToLocation = allStockLocationsDocs.find(doc => 
                         doc.data().itemCode === itemData.code && 
-                        doc.data().address === toAddress
+                        canonAddr(doc.data().address) === toAddressKey
                     );
                     
                     if (existingToLocation) {
                         const newToQuantity = (existingToLocation.data().quantity || 0) + quantityToTransfer;
-                        await updateDoc(getStockDocRef(existingToLocation), { quantity: newToQuantity });
+                        await updateDoc(getStockDocRef(existingToLocation), {
+                            quantity: newToQuantity,
+                            address: toAddress   // normaliza ao mesmo tempo
+                        });
                     } else {
                         await addDoc(stockLocationsCollection, {
                             itemCode: itemData.code,
@@ -4194,22 +4224,23 @@
             clearStockPanelBtn.addEventListener('click', clearAllStockRecords);
         }
 
-        // Consolidar duplicatas de estoque (mesmo itemCode + mesmo endereço)
+        // Consolidar duplicatas de estoque (mesmo itemCode + mesmo endereço, tolerante a espaços)
         const consolidateStockBtn = document.getElementById('consolidate-stock-btn');
         if (consolidateStockBtn) {
             consolidateStockBtn.addEventListener('click', async () => {
                 if (!isLoggedIn) return;
-                if (!confirm('Isso irá somar e consolidar todos os registros duplicados (mesmo item e mesmo endereço) em um único registro. Deseja continuar?')) return;
+                if (!confirm('Isso irá somar e consolidar todos os registros duplicados (mesmo item e mesmo endereço) em um único registro. Endereços com diferenças de espaçamento (ex: "ALM.EXT" e "ALM. EXT") também serão unificados. Deseja continuar?')) return;
 
                 consolidateStockBtn.disabled = true;
                 consolidateStockBtn.textContent = 'Consolidando...';
 
                 try {
-                    // Agrupar por chave "itemCode|address"
+                    // Agrupa por "itemCode + endereço sem espaços (canonAddr)"
+                    // Isso detecta "ALM. EXT" e "ALM.EXT" como o mesmo endereço
                     const groups = {};
                     allStockLocationsDocs.forEach(d => {
                         const data = d.data();
-                        const key = `${data.itemCode}||${(data.address || '').replace(/\s+/g, ' ').trim()}`;
+                        const key = `${data.itemCode}||${canonAddr(data.address)}`;
                         if (!groups[key]) groups[key] = [];
                         groups[key].push(d);
                     });
@@ -4219,14 +4250,27 @@
 
                     for (const key of Object.keys(groups)) {
                         const docs = groups[key];
-                        if (docs.length < 2) continue; // sem duplicata
+                        if (docs.length < 2) continue;
 
                         const totalQty = docs.reduce((sum, d) => sum + (d.data().quantity || 0), 0);
-                        // Manter o primeiro documento com a soma total
-                        batch.update(getStockDocRef(docs[0]), { quantity: totalQty });
-                        // Excluir os demais
-                        for (let i = 1; i < docs.length; i++) {
-                            batch.delete(getStockDocRef(docs[i]));
+
+                        // Escolhe o doc com o endereço mais "limpo" (menor número de espaços = mais canônico)
+                        const best = docs.slice().sort((a, b) => {
+                            const aSpaces = (a.data().address || '').split('').filter(c => c === ' ').length;
+                            const bSpaces = (b.data().address || '').split('').filter(c => c === ' ').length;
+                            return aSpaces - bSpaces;
+                        })[0];
+                        const canonicalAddress = storeAddr(best.data().address);
+
+                        // Atualiza o doc sobrevivente com a quantidade total e endereço normalizado
+                        batch.update(getStockDocRef(best), {
+                            quantity: totalQty,
+                            address: canonicalAddress
+                        });
+
+                        // Deleta os demais
+                        for (const d of docs) {
+                            if (d.id !== best.id) batch.delete(getStockDocRef(d));
                         }
                         merged++;
                     }
@@ -4235,7 +4279,7 @@
                         alert('Nenhuma duplicata encontrada. O estoque já está consolidado.');
                     } else {
                         await batch.commit();
-                        alert(`Consolidação concluída! ${merged} grupo(s) de duplicatas foram somados.`);
+                        alert(`Consolidação concluída! ${merged} grupo(s) de duplicatas foram somados e endereços padronizados.`);
                     }
                 } catch (err) {
                     console.error('Erro ao consolidar estoque:', err);
