@@ -1582,11 +1582,22 @@
         }
 
         /**
-         * Forma de armazenamento canônica: colapsa espaços múltiplos em um único
-         * e remove espaços ao redor de hífen. Usada ao GRAVAR um novo endereço.
+         * Forma de armazenamento canônica para endereço:
+         * remove todos os espaços dentro de cada parte (depósito e endereço),
+         * mantendo apenas o separador " - " entre elas.
+         * "Almox. Blocado - ALM. EXT" → "Almox.Blocado - ALM.EXT"
          */
         function storeAddr(addr) {
-            return (addr || '').replace(/\s+/g, ' ').replace(/\s*-\s*/g, ' - ').trim();
+            const parts = (addr || '').split(/\s*-\s*/);
+            return parts.map(p => p.replace(/\s+/g, '')).join(' - ').trim();
+        }
+
+        /**
+         * Forma de armazenamento canônica para código de item:
+         * remove todos os espaços. "PUAC-IS 0K1" → "PUAC-IS0K1"
+         */
+        function storeCode(code) {
+            return (code || '').replace(/\s+/g, '');
         }
 
         function matchesRequisitionSearch(data, normalizedTerm) {
@@ -2684,7 +2695,35 @@
         // Adicionar event listeners apenas uma vez
         if (!formListenersAttached) {
             formListenersAttached = true;
-            
+
+            // ── Campos que não devem conter espaços ──────────────────────────
+            // Remove espaços em tempo real, tanto ao digitar quanto ao colar.
+            const noSpaceIds = [
+                'item-code',          // Cadastro de itens
+                'edit-item-code',     // Edição de itens
+                'productCodeInput',   // Etiquetas
+                'stock-entry-address',// Entrada manual de estoque (endereço)
+                'transfer-to-address',// Transferência (endereço de destino)
+                'edit-stock-address', // Edição de endereço no estoque
+            ];
+            noSpaceIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                const strip = () => {
+                    const pos = el.selectionStart;
+                    const before = el.value;
+                    const after = before.replace(/\s+/g, '');
+                    if (before !== after) {
+                        el.value = after;
+                        // Reposiciona cursor descontando espaços removidos antes do cursor
+                        const removed = before.slice(0, pos).replace(/\S/g, '').length;
+                        el.setSelectionRange(pos - removed, pos - removed);
+                    }
+                };
+                el.addEventListener('input', strip);
+                el.addEventListener('paste', () => setTimeout(strip, 0));
+            });
+
             requisitionForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2861,13 +2900,13 @@
                 try {
                     if (existingLocationForUpdate) {
                         const newQuantity = (existingLocationForUpdate.data().quantity || 0) + quantityToAdd;
-                        // Aproveita a atualização para padronizar o endereço gravado
                         await updateDoc(existingLocationForUpdate.ref || getStockDocRef(existingLocationForUpdate), {
                             quantity: newQuantity,
-                            address: address   // normaliza o endereço para a forma canônica
+                            address: address,
+                            itemCode: storeCode(itemData.code)
                         });
                         logMeta('stock_entry', {
-                            itemCode: itemData.code,
+                            itemCode: storeCode(itemData.code),
                             address,
                             quantity: quantityToAdd,
                             mode: 'increment'
@@ -2875,7 +2914,7 @@
                         bumpCounter('stock_entry');
                     } else {
                         await addDoc(stockLocationsCollection, {
-                            itemCode: itemData.code,
+                            itemCode: storeCode(itemData.code),
                             address: address,
                             quantity: quantityToAdd
                         });
@@ -2945,11 +2984,12 @@
                         const newToQuantity = (existingToLocation.data().quantity || 0) + quantityToTransfer;
                         await updateDoc(getStockDocRef(existingToLocation), {
                             quantity: newToQuantity,
-                            address: toAddress   // normaliza ao mesmo tempo
+                            address: toAddress,
+                            itemCode: storeCode(itemData.code)
                         });
                     } else {
                         await addDoc(stockLocationsCollection, {
-                            itemCode: itemData.code,
+                            itemCode: storeCode(itemData.code),
                             address: toAddress,
                             quantity: quantityToTransfer
                         });
@@ -4224,63 +4264,91 @@
             clearStockPanelBtn.addEventListener('click', clearAllStockRecords);
         }
 
-        // Consolidar duplicatas de estoque (mesmo itemCode + mesmo endereço, tolerante a espaços)
+        // Consolidar duplicatas + normalizar código e endereço de todos os registros
         const consolidateStockBtn = document.getElementById('consolidate-stock-btn');
         if (consolidateStockBtn) {
             consolidateStockBtn.addEventListener('click', async () => {
                 if (!isLoggedIn) return;
-                if (!confirm('Isso irá somar e consolidar todos os registros duplicados (mesmo item e mesmo endereço) em um único registro. Endereços com diferenças de espaçamento (ex: "ALM.EXT" e "ALM. EXT") também serão unificados. Deseja continuar?')) return;
+                if (!confirm(
+                    'Isso irá:\n' +
+                    '1. Remover espaços de todos os códigos e endereços (ex: "ALM. EXT" → "ALM.EXT")\n' +
+                    '2. Somar e consolidar registros duplicados (mesmo item + mesmo endereço)\n\n' +
+                    'Deseja continuar?'
+                )) return;
 
                 consolidateStockBtn.disabled = true;
-                consolidateStockBtn.textContent = 'Consolidando...';
+                consolidateStockBtn.textContent = 'Normalizando...';
 
                 try {
-                    // Agrupa por "itemCode + endereço sem espaços (canonAddr)"
-                    // Isso detecta "ALM. EXT" e "ALM.EXT" como o mesmo endereço
+                    // ── Agrupa por chave canônica (sem espaços, maiúsculo) ──────────
                     const groups = {};
                     allStockLocationsDocs.forEach(d => {
                         const data = d.data();
-                        const key = `${data.itemCode}||${canonAddr(data.address)}`;
-                        if (!groups[key]) groups[key] = [];
-                        groups[key].push(d);
+                        const normCode = storeCode(data.itemCode || '');
+                        const normAddr = storeAddr(data.address || '');
+                        const key = `${normCode}||${canonAddr(normAddr)}`;
+                        if (!groups[key]) groups[key] = { normCode, normAddr, docs: [] };
+                        groups[key].docs.push(d);
                     });
 
-                    let merged = 0;
-                    const batch = writeBatch(secondaryDb);
+                    // ── Acumula operações ─────────────────────────────────────────
+                    const ops = []; // { type: 'update'|'delete', ref, data? }
+                    let mergedGroups = 0;
+                    let normalizedOnly = 0;
 
-                    for (const key of Object.keys(groups)) {
-                        const docs = groups[key];
-                        if (docs.length < 2) continue;
-
-                        const totalQty = docs.reduce((sum, d) => sum + (d.data().quantity || 0), 0);
-
-                        // Escolhe o doc com o endereço mais "limpo" (menor número de espaços = mais canônico)
-                        const best = docs.slice().sort((a, b) => {
-                            const aSpaces = (a.data().address || '').split('').filter(c => c === ' ').length;
-                            const bSpaces = (b.data().address || '').split('').filter(c => c === ' ').length;
-                            return aSpaces - bSpaces;
-                        })[0];
-                        const canonicalAddress = storeAddr(best.data().address);
-
-                        // Atualiza o doc sobrevivente com a quantidade total e endereço normalizado
-                        batch.update(getStockDocRef(best), {
-                            quantity: totalQty,
-                            address: canonicalAddress
-                        });
-
-                        // Deleta os demais
-                        for (const d of docs) {
-                            if (d.id !== best.id) batch.delete(getStockDocRef(d));
+                    for (const { normCode, normAddr, docs } of Object.values(groups)) {
+                        if (docs.length === 1) {
+                            const d = docs[0];
+                            const data = d.data();
+                            const needsUpdate =
+                                data.itemCode !== normCode || data.address !== normAddr;
+                            if (needsUpdate) {
+                                ops.push({ type: 'update', ref: getStockDocRef(d),
+                                    data: { itemCode: normCode, address: normAddr } });
+                                normalizedOnly++;
+                            }
+                        } else {
+                            // Duplicatas: soma qtd, mantém o doc com mais quantidade
+                            const totalQty = docs.reduce((s, d) => s + (d.data().quantity || 0), 0);
+                            const best = docs.slice().sort((a, b) =>
+                                (b.data().quantity || 0) - (a.data().quantity || 0)
+                            )[0];
+                            ops.push({ type: 'update', ref: getStockDocRef(best),
+                                data: { itemCode: normCode, address: normAddr, quantity: totalQty } });
+                            for (const d of docs) {
+                                if (d.id !== best.id)
+                                    ops.push({ type: 'delete', ref: getStockDocRef(d) });
+                            }
+                            mergedGroups++;
                         }
-                        merged++;
                     }
 
-                    if (merged === 0) {
-                        alert('Nenhuma duplicata encontrada. O estoque já está consolidado.');
-                    } else {
-                        await batch.commit();
-                        alert(`Consolidação concluída! ${merged} grupo(s) de duplicatas foram somados e endereços padronizados.`);
+                    if (ops.length === 0) {
+                        alert('Tudo já está normalizado e sem duplicatas!');
+                        return;
                     }
+
+                    // ── Comita em lotes de 450 para respeitar limite do Firestore ─
+                    const CHUNK = 450;
+                    for (let i = 0; i < ops.length; i += CHUNK) {
+                        const chunk = ops.slice(i, i + CHUNK);
+                        const batch = writeBatch(secondaryDb);
+                        chunk.forEach(op => {
+                            if (op.type === 'update') batch.update(op.ref, op.data);
+                            else batch.delete(op.ref);
+                        });
+                        await batch.commit();
+                        if (ops.length > CHUNK) {
+                            consolidateStockBtn.textContent =
+                                `Normalizando... ${Math.min(i + CHUNK, ops.length)}/${ops.length}`;
+                        }
+                    }
+
+                    const parts = [];
+                    if (mergedGroups > 0) parts.push(`${mergedGroups} grupo(s) de duplicatas consolidados`);
+                    if (normalizedOnly > 0) parts.push(`${normalizedOnly} registro(s) com código/endereço normalizado`);
+                    alert('Concluído!\n' + parts.join('\n'));
+
                 } catch (err) {
                     console.error('Erro ao consolidar estoque:', err);
                     alert('Erro ao consolidar: ' + err.message);
