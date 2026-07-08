@@ -948,7 +948,7 @@
             <!-- Resumo de alocação -->
             <div id="delivery-allocation-summary" class="rounded-xl border px-4 py-3 mb-4 text-sm font-medium flex items-center justify-between transition-colors">
                 <span>Necessário: <strong id="delivery-needed-qty">0</strong> und</span>
-                <span id="delivery-allocated-label">Alocado: <strong id="delivery-allocated-qty">0</strong> und</span>
+                <span id="delivery-allocated-label">Alocado: 0 und</span>
             </div>
 
             <div id="locations-list" class="space-y-2 max-h-72 overflow-y-auto mb-2">
@@ -3388,7 +3388,6 @@
 
             // ── Resumo ──────────────────────────────────────────────────────
             document.getElementById('delivery-needed-qty').textContent = currentDeliveryNeededQty;
-            document.getElementById('delivery-allocated-qty').textContent = totalAllocated;
             const summaryEl = document.getElementById('delivery-allocation-summary');
             const fullyAllocated = remaining === 0 && totalAllocated > 0;
             if (fullyAllocated) {
