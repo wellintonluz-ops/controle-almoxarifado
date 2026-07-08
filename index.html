@@ -2718,8 +2718,18 @@
             const addEquipBtnEl = document.getElementById('add-equipment-btn');
             if (addEquipBtnEl) addEquipBtnEl.classList.toggle('hidden', !isAdmin);
             if (isFirestoreReady) {
+                // IMPORTANTE: como a autenticação Google agora acontece automaticamente
+                // para todo mundo (não só para o admin), as tabelas de Itens, Estoque e
+                // Funcionários já chegam populadas ANTES do login com senha de admin —
+                // ou seja, a coluna "Ações" é desenhada pela primeira vez com isLoggedIn
+                // ainda false. Sem re-render aqui, os botões de admin só apareceriam na
+                // próxima mudança real dos dados (o que pode nunca acontecer). Por isso
+                // todas as tabelas precisam ser re-renderizadas a cada troca de login.
                 renderRequisitions();
                 renderKanbanBoard();
+                renderItems();
+                renderStock();
+                renderEmployees();
             }
         }
 
