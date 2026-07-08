@@ -941,17 +941,24 @@
     </div>
     <div id="status-modal" class="modal-backdrop hidden"><div class="modal-content"><h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">Atualizar Status da Requisição</h3><div><label for="status-select" class="block text-sm font-medium text-gray-700">Novo Status</label><select id="status-select" name="status-select" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"><option>Pendente</option><option>Rejeitado</option><option>Entregue</option></select><input type="hidden" id="modal-requisition-id"><input type="hidden" id="modal-original-status"></div><div class="mt-6 flex justify-end space-x-4"><button type="button" id="cancel-update" class="py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">Cancelar</button><button type="button" id="confirm-update" class="btn-primary py-2 px-4 rounded-md shadow-sm text-sm font-medium">Salvar</button></div></div></div>
     <div id="location-select-modal" class="modal-backdrop hidden">
-        <div class="modal-content">
-            <h3 class="text-lg font-medium leading-6 text-gray-900 mb-2">Selecionar Local de Saída</h3>
-            <p class="text-sm text-gray-600 mb-4">Selecione de qual endereço o item será retirado do estoque.</p>
-            <div id="locations-list" class="space-y-2 max-h-60 overflow-y-auto mb-6">
+        <div class="modal-content max-w-lg">
+            <h3 class="text-lg font-medium leading-6 text-gray-900 mb-1">Selecionar Local(is) de Saída</h3>
+            <p class="text-sm text-gray-600 mb-3">Marque um ou mais endereços. O sistema calcula automaticamente quanto retirar de cada um, começando pelo primeiro marcado.</p>
+
+            <!-- Resumo de alocação -->
+            <div id="delivery-allocation-summary" class="rounded-xl border px-4 py-3 mb-4 text-sm font-medium flex items-center justify-between transition-colors">
+                <span>Necessário: <strong id="delivery-needed-qty">0</strong> und</span>
+                <span id="delivery-allocated-label">Alocado: <strong id="delivery-allocated-qty">0</strong> und</span>
+            </div>
+
+            <div id="locations-list" class="space-y-2 max-h-72 overflow-y-auto mb-2">
                 <!-- Locais serão populados via JS -->
             </div>
-            <p id="location-select-error" class="text-sm text-red-600 mt-2 hidden">Por favor, selecione um local.</p>
+            <p id="location-select-error" class="text-sm text-red-600 mt-2 hidden">Por favor, selecione locais suficientes para cobrir toda a quantidade.</p>
             <input type="hidden" id="modal-location-req-id">
             <div class="mt-6 flex justify-end space-x-4">
                 <button type="button" id="cancel-location-selection" class="py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50">Cancelar</button>
-                <button type="button" id="confirm-location-selection" class="btn-primary py-2 px-4 rounded-md shadow-sm text-sm font-medium">Confirmar Saída</button>
+                <button type="button" id="confirm-location-selection" class="btn-primary py-2 px-4 rounded-md shadow-sm text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>Confirmar Saída</button>
             </div>
         </div>
     </div>
@@ -1194,6 +1201,11 @@
         const stockTransferForm = document.getElementById('stock-transfer-form'), transferItemSelect = document.getElementById('transfer-item-select'), transferFromAddress = document.getElementById('transfer-from-address'), transferToAddress = document.getElementById('transfer-to-address'), transferQuantity = document.getElementById('transfer-quantity'), submitTransferBtn = document.getElementById('submit-transfer-btn'), originQuantity = document.getElementById('origin-quantity');
         const stockOutForm = document.getElementById('stock-out-form'), stockOutItemSelect = document.getElementById('stock-out-item-select'), stockOutAddress = document.getElementById('stock-out-address'), stockOutQuantity = document.getElementById('stock-out-quantity'), submitStockOutBtn = document.getElementById('submit-stock-out-btn'), stockOutAvailable = document.getElementById('stock-out-available');
         const locationSelectModal = document.getElementById('location-select-modal'), locationsList = document.getElementById('locations-list'), locationSelectError = document.getElementById('location-select-error'), confirmLocationSelectionBtn = document.getElementById('confirm-location-selection'), cancelLocationSelectionBtn = document.getElementById('cancel-location-selection'), modalLocationReqId = document.getElementById('modal-location-req-id');
+
+        // Estado da seleção de múltiplos locais de saída (entrega de requisição)
+        let deliverySelectionOrder = [];   // ids dos endereços, na ordem em que foram marcados
+        let currentDeliveryNeededQty = 0;  // quantidade total da requisição em entrega
+        let currentDeliveryItemCode = '';  // código do item sendo entregue
         const editItemModal = document.getElementById('edit-item-modal'), editItemForm = document.getElementById('edit-item-form'), cancelEditItemBtn = document.getElementById('cancel-edit-item');
         const dashboardStartDate = document.getElementById('dashboard-start-date');
         const dashboardEndDate = document.getElementById('dashboard-end-date');
@@ -3337,7 +3349,104 @@
             }
         }
 
-        async function handleStatusUpdate() {
+        /**
+         * Recalcula a alocação automática por local e redesenha a lista do modal
+         * de entrega. Regra: percorre `deliverySelectionOrder` (ordem em que o
+         * admin marcou os checkboxes); cada local consome min(disponível, restante).
+         * O primeiro local marcado é drenado ao máximo; o local que fecha a conta
+         * consome só o necessário, deixando o resto no estoque.
+         */
+        function renderDeliveryLocationsList() {
+            const locations = allStockLocationsDocs.filter(doc =>
+                doc.data().itemCode === currentDeliveryItemCode && (doc.data().quantity || 0) > 0
+            );
+
+            // Remove da seleção locais que não existem mais / zeraram
+            deliverySelectionOrder = deliverySelectionOrder.filter(id => locations.some(l => l.id === id));
+
+            // Calcula alocação sequencial
+            let remaining = currentDeliveryNeededQty;
+            const allocationMap = {};
+            deliverySelectionOrder.forEach(locId => {
+                const loc = locations.find(l => l.id === locId);
+                const available = loc.data().quantity || 0;
+                const alloc = Math.max(0, Math.min(available, remaining));
+                allocationMap[locId] = alloc;
+                remaining -= alloc;
+            });
+            const totalAllocated = currentDeliveryNeededQty - remaining;
+
+            // ── Resumo ──────────────────────────────────────────────────────
+            document.getElementById('delivery-needed-qty').textContent = currentDeliveryNeededQty;
+            document.getElementById('delivery-allocated-qty').textContent = totalAllocated;
+            const summaryEl = document.getElementById('delivery-allocation-summary');
+            const fullyAllocated = remaining === 0 && totalAllocated > 0;
+            if (fullyAllocated) {
+                summaryEl.className = 'rounded-xl border px-4 py-3 mb-4 text-sm font-medium flex items-center justify-between transition-colors bg-green-50 border-green-300 text-green-800';
+            } else {
+                summaryEl.className = 'rounded-xl border px-4 py-3 mb-4 text-sm font-medium flex items-center justify-between transition-colors bg-amber-50 border-amber-300 text-amber-800';
+            }
+            document.getElementById('delivery-allocated-label').innerHTML =
+                fullyAllocated
+                    ? `✓ Quantidade total alocada`
+                    : `Faltam <strong>${remaining}</strong> und para completar`;
+
+            // ── Lista de locais ─────────────────────────────────────────────
+            locationsList.innerHTML = locations.map(loc => {
+                const locData = loc.data();
+                const available = locData.quantity || 0;
+                const isSelected = deliverySelectionOrder.includes(loc.id);
+                const alloc = allocationMap[loc.id] || 0;
+
+                let infoHtml = '';
+                let boxClass = 'border-gray-200';
+                if (isSelected) {
+                    if (alloc === 0) {
+                        infoHtml = `<p class="text-xs text-gray-500 mt-1">A quantidade da requisição já foi atingida com os locais anteriores — este local não será utilizado.</p>`;
+                        boxClass = 'border-gray-300 bg-gray-50';
+                    } else if (alloc === available) {
+                        infoHtml = `<p class="text-xs text-amber-700 mt-1 font-medium">Será consumido o total desta localização: <strong>${alloc} und</strong></p>`;
+                        boxClass = 'border-amber-300 bg-amber-50';
+                    } else {
+                        infoHtml = `<p class="text-xs text-green-700 mt-1 font-medium">Será consumido apenas <strong>${alloc} und</strong> desta localização — restarão <strong>${available - alloc} und</strong> em estoque.</p>`;
+                        boxClass = 'border-green-300 bg-green-50';
+                    }
+                }
+
+                return `
+                    <div class="p-3 border rounded-lg ${boxClass} transition-colors" data-loc-id="${loc.id}">
+                        <label class="flex items-start gap-3 cursor-pointer">
+                            <input type="checkbox" class="delivery-loc-checkbox mt-1" data-id="${loc.id}" ${isSelected ? 'checked' : ''}>
+                            <div class="flex-1">
+                                <div class="flex justify-between items-center gap-2">
+                                    <span class="font-medium text-sm text-gray-800">${escapeHTML(locData.address || '-')}</span>
+                                    <span class="text-xs text-gray-500 whitespace-nowrap">Disponível: ${available}</span>
+                                </div>
+                                ${infoHtml}
+                            </div>
+                        </label>
+                    </div>
+                `;
+            }).join('');
+
+            // Listeners dos checkboxes (o innerHTML é recriado a cada render)
+            locationsList.querySelectorAll('.delivery-loc-checkbox').forEach(cb => {
+                cb.addEventListener('change', () => {
+                    const id = cb.dataset.id;
+                    if (cb.checked) {
+                        if (!deliverySelectionOrder.includes(id)) deliverySelectionOrder.push(id);
+                    } else {
+                        deliverySelectionOrder = deliverySelectionOrder.filter(x => x !== id);
+                    }
+                    renderDeliveryLocationsList();
+                });
+            });
+
+            confirmLocationSelectionBtn.disabled = !fullyAllocated;
+            locationSelectError.classList.add('hidden');
+        }
+
+
             const reqId = modalRequisitionId.value;
             const newStatus = statusSelect.value;
             const oldStatus = modalOriginalStatus.value;
@@ -3354,26 +3463,20 @@
 
             if (newStatus === 'Entregue' && oldStatus !== 'Entregue') {
                 const { itemCode, quantity } = reqDocData;
-                const suitableLocations = allStockLocationsDocs.filter(doc => doc.data().itemCode === itemCode && doc.data().quantity >= quantity);
+                const matchingLocations = allStockLocationsDocs.filter(doc =>
+                    doc.data().itemCode === itemCode && (doc.data().quantity || 0) > 0
+                );
+                const totalAvailable = matchingLocations.reduce((sum, d) => sum + (d.data().quantity || 0), 0);
 
-                if (suitableLocations.length === 0) {
-                    alert(`Estoque insuficiente para o item ${itemCode}. Não é possível marcar como "Entregue".`);
+                if (totalAvailable < quantity) {
+                    alert(`Estoque insuficiente para o item ${itemCode}. Disponível no total: ${totalAvailable}, necessário: ${quantity}. Não é possível marcar como "Entregue".`);
                     return;
                 }
 
-                locationsList.innerHTML = '';
-                suitableLocations.forEach(loc => {
-                    const locData = loc.data();
-                    const radioId = `loc-${loc.id}`;
-                    locationsList.innerHTML += `
-                        <div class="p-2 border rounded-md hover:bg-gray-50">
-                            <input type="radio" name="stockLocation" value="${loc.id}" id="${radioId}" class="mr-2">
-                            <label for="${radioId}" class="cursor-pointer">
-                                <strong>Endereço:</strong> ${locData.address} <span class="text-gray-500">(Qtd: ${locData.quantity})</span>
-                            </label>
-                        </div>
-                    `;
-                });
+                deliverySelectionOrder = [];
+                currentDeliveryNeededQty = quantity;
+                currentDeliveryItemCode = itemCode;
+                renderDeliveryLocationsList();
 
                 modalLocationReqId.value = reqId;
                 locationSelectError.classList.add('hidden');
@@ -3392,22 +3495,39 @@
                 const reqDocSnap = await getDoc(reqDocRef);
                 if (!reqDocSnap.exists()) throw 'Requisição não encontrada!';
 
-                const { stockLocationId, quantity } = reqDocSnap.data();
+                const { stockLocationId, stockAllocations, quantity } = reqDocSnap.data();
                 const updateData = { status: newStatus, statusUpdatedAt: serverTimestamp() };
 
-                // Se estiver revertendo uma entrega, devolve ao projeto de origem do registro de estoque
+                // Se estiver revertendo uma entrega, devolve a(s) quantidade(s) ao(s) endereço(s) de origem
                 if (newStatus !== 'Entregue' && oldStatus === 'Entregue') {
-                    if (!stockLocationId) throw "Não foi possível reverter a entrega: Localização de origem desconhecida.";
-                    const stockEntry = getStockEntryById(stockLocationId);
-                    if (!stockEntry) throw "Localização de estoque da entrega anterior não encontrada.";
-                    await runTransaction(getStockDbBySource(stockEntry.source), async (transaction) => {
-                        const locationToUpdateRef = getStockDocRef(stockEntry);
-                        const locationDoc = await transaction.get(locationToUpdateRef);
-                        if (!locationDoc.exists()) throw "Localização de estoque da entrega anterior não encontrada.";
-                        const newQuantity = (locationDoc.data().quantity || 0) + quantity;
-                        transaction.update(locationToUpdateRef, { quantity: newQuantity });
-                    });
-                    updateData.stockLocationId = null;
+                    if (Array.isArray(stockAllocations) && stockAllocations.length > 0) {
+                        // Formato novo: entrega feita a partir de múltiplos endereços
+                        await runTransaction(secondaryDb, async (transaction) => {
+                            const refs = stockAllocations.map(a => getStockDocRef(a.locationId));
+                            const snaps = await Promise.all(refs.map(ref => transaction.get(ref)));
+                            snaps.forEach((snap, i) => {
+                                const alloc = stockAllocations[i];
+                                if (!snap.exists()) return; // endereço pode ter sido excluído; ignora e segue
+                                const newQuantity = (snap.data().quantity || 0) + alloc.quantity;
+                                transaction.update(refs[i], { quantity: newQuantity });
+                            });
+                        });
+                        updateData.stockAllocations = null;
+                    } else if (stockLocationId) {
+                        // Formato legado: entrega feita a partir de um único endereço
+                        const stockEntry = getStockEntryById(stockLocationId);
+                        if (!stockEntry) throw "Localização de estoque da entrega anterior não encontrada.";
+                        await runTransaction(secondaryDb, async (transaction) => {
+                            const locationToUpdateRef = getStockDocRef(stockEntry);
+                            const locationDoc = await transaction.get(locationToUpdateRef);
+                            if (!locationDoc.exists()) throw "Localização de estoque da entrega anterior não encontrada.";
+                            const newQuantity = (locationDoc.data().quantity || 0) + quantity;
+                            transaction.update(locationToUpdateRef, { quantity: newQuantity });
+                        });
+                        updateData.stockLocationId = null;
+                    } else {
+                        throw "Não foi possível reverter a entrega: origem do estoque desconhecida.";
+                    }
                 }
 
                 await updateDoc(reqDocRef, updateData);
@@ -3425,15 +3545,33 @@
         }
 
         async function confirmDeliveryFromLocation() {
-            const selectedLocationRadio = document.querySelector('input[name="stockLocation"]:checked');
-            if (!selectedLocationRadio) {
+            const reqId = modalLocationReqId.value;
+
+            // Recalcula a alocação final a partir da seleção atual (mesma lógica do render)
+            const locations = allStockLocationsDocs.filter(doc =>
+                doc.data().itemCode === currentDeliveryItemCode && (doc.data().quantity || 0) > 0
+            );
+            let remaining = currentDeliveryNeededQty;
+            const allocations = []; // { locationId, address, quantity }
+            for (const locId of deliverySelectionOrder) {
+                if (remaining <= 0) break;
+                const loc = locations.find(l => l.id === locId);
+                if (!loc) continue;
+                const available = loc.data().quantity || 0;
+                const alloc = Math.max(0, Math.min(available, remaining));
+                if (alloc > 0) {
+                    allocations.push({ locationId: locId, address: loc.data().address || '', quantity: alloc });
+                    remaining -= alloc;
+                }
+            }
+
+            if (remaining > 0 || allocations.length === 0) {
+                locationSelectError.textContent = 'Selecione locais suficientes para cobrir toda a quantidade da requisição.';
                 locationSelectError.classList.remove('hidden');
                 return;
             }
             locationSelectError.classList.add('hidden');
 
-            const locationId = selectedLocationRadio.value;
-            const reqId = modalLocationReqId.value;
             const reqEntry = allRequisitionsDocs.find(r => r.id === reqId);
             if (!reqEntry) {
                 alert('Requisição não encontrada.');
@@ -3441,7 +3579,6 @@
             }
 
             const targetCollection = reqEntry.source === 'new' ? requisitionsCollectionSecondary : requisitionsCollectionPrimary;
-            const targetDb = reqEntry.source === 'new' ? secondaryDb : db;
             const reqDocRef = doc(targetCollection, reqId);
             const reqDocSnap = await getDoc(reqDocRef);
             if (!reqDocSnap.exists()) {
@@ -3449,39 +3586,57 @@
                 return;
             }
 
-            const { quantity } = reqDocSnap.data();
-            const stockEntry = getStockEntryById(locationId);
-            if (!stockEntry) {
-                alert('Localização de estoque selecionada não existe mais.');
-                return;
-            }
-            const locationToUpdateRef = getStockDocRef(stockEntry);
+            confirmLocationSelectionBtn.disabled = true;
+            confirmLocationSelectionBtn.textContent = 'Confirmando...';
 
             try {
-                await runTransaction(getStockDbBySource(stockEntry.source), async (transaction) => {
-                    const locationDoc = await transaction.get(locationToUpdateRef);
-                    if (!locationDoc.exists()) throw "Localização de estoque selecionada não existe mais.";
-                    const currentStock = locationDoc.data().quantity || 0;
-                    if (currentStock < quantity) throw `Estoque no local selecionado é insuficiente. Ação cancelada.`;
-                    const newQuantity = currentStock - quantity;
-                    transaction.update(locationToUpdateRef, { quantity: newQuantity });
+                // Transação única: todos os endereços envolvidos estão no mesmo
+                // banco (secondaryDb), então a baixa em múltiplos locais é atômica —
+                // ou tudo é debitado corretamente, ou nada é alterado.
+                await runTransaction(secondaryDb, async (transaction) => {
+                    // 1) Fase de leitura: busca o estado atual de TODOS os locais primeiro
+                    const refs = allocations.map(a => getStockDocRef(a.locationId));
+                    const snaps = await Promise.all(refs.map(ref => transaction.get(ref)));
+
+                    // 2) Validação: garante que nada mudou desde o cálculo da alocação
+                    snaps.forEach((snap, i) => {
+                        const alloc = allocations[i];
+                        if (!snap.exists()) throw `A localização "${alloc.address}" não existe mais.`;
+                        const current = snap.data().quantity || 0;
+                        if (current < alloc.quantity) {
+                            throw `Estoque em "${alloc.address}" mudou e ficou insuficiente (disponível: ${current}, necessário: ${alloc.quantity}). Reabra a entrega e tente novamente.`;
+                        }
+                    });
+
+                    // 3) Fase de escrita: debita cada local
+                    snaps.forEach((snap, i) => {
+                        const alloc = allocations[i];
+                        const newQty = (snap.data().quantity || 0) - alloc.quantity;
+                        transaction.update(refs[i], { quantity: newQty });
+                    });
                 });
 
-                await updateDoc(reqDocRef, { 
-                    status: 'Entregue', 
-                    statusUpdatedAt: serverTimestamp(), 
-                    stockLocationId: locationId 
+                await updateDoc(reqDocRef, {
+                    status: 'Entregue',
+                    statusUpdatedAt: serverTimestamp(),
+                    stockAllocations: allocations,   // novo formato: multi-localização
+                    stockLocationId: null            // campo legado, não usado nesta entrega
                 });
                 logMeta('requisition_delivery', {
                     reqId,
-                    locationId,
+                    locations: allocations.map(a => `${a.address}:${a.quantity}`).join(', '),
                     status: 'Entregue'
                 });
                 bumpCounter('requisition_delivery');
+
+                deliverySelectionOrder = [];
                 locationSelectModal.classList.add('hidden');
             } catch (error) {
                 console.error("Erro ao confirmar entrega: ", error);
                 alert(`Falha ao confirmar a entrega: ${error}`);
+            } finally {
+                confirmLocationSelectionBtn.disabled = false;
+                confirmLocationSelectionBtn.textContent = 'Confirmar Saída';
             }
         }
         
@@ -3828,7 +3983,10 @@
         cancelLoginBtn.addEventListener('click', () => loginModal.classList.add('hidden'));
         cancelUpdateBtn.addEventListener('click', () => statusModal.classList.add('hidden'));
         confirmUpdateBtn.addEventListener('click', handleStatusUpdate);
-        cancelLocationSelectionBtn.addEventListener('click', () => locationSelectModal.classList.add('hidden'));
+        cancelLocationSelectionBtn.addEventListener('click', () => {
+            deliverySelectionOrder = [];
+            locationSelectModal.classList.add('hidden');
+        });
         confirmLocationSelectionBtn.addEventListener('click', confirmDeliveryFromLocation);
         cancelEditItemBtn.addEventListener('click', () => editItemModal.classList.add('hidden'));
 
