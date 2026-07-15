@@ -471,6 +471,17 @@
 
                     <!-- Painel de saldo em estoque — aparece após selecionar item -->
                     <div id="stock-balance-info" class="md:col-span-6 hidden">
+                        <!-- estado: não foi possível verificar (SEM dados de estoque carregados/confirmados) -->
+                        <div id="stock-balance-unknown" class="hidden flex items-start gap-3 bg-slate-100 border border-slate-300 text-slate-700 rounded-xl px-4 py-3 text-sm font-medium">
+                            <svg class="flex-shrink-0 mt-0.5" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                            <div class="flex-1">
+                                <p>Não foi possível confirmar o estoque deste item agora (problema de conexão). Por segurança, o envio fica bloqueado até confirmarmos o saldo real.</p>
+                                <button type="button" id="stock-balance-retry-btn" class="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 hover:text-blue-900 border border-blue-300 hover:bg-blue-50 rounded-lg px-3 py-1.5 transition-colors">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v6h-6"/></svg>
+                                    Tentar verificar novamente
+                                </button>
+                            </div>
+                        </div>
                         <!-- estado: sem saldo -->
                         <div id="stock-balance-empty" class="hidden flex items-start gap-3 bg-red-50 border border-red-300 text-red-800 rounded-xl px-4 py-3 text-sm font-medium">
                             <svg class="flex-shrink-0 mt-0.5" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
@@ -1360,6 +1371,11 @@
             sessionStorage.removeItem(FIREBASE_REDIRECT_MODE_KEY);
         }
 
+        const SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY = 'firebaseSilentGoogleAttemptSecondary';
+        function clearSilentSecondaryGoogleAttempt() {
+            sessionStorage.removeItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY);
+        }
+
         async function ensureSecondaryGoogleAuth(interactive = false) {
             await secondaryAuthInitPromise;
 
@@ -1374,11 +1390,66 @@
             try {
                 const loginHint = auth.currentUser.email || '';
                 await signInWithPopup(secondaryAuth, buildGoogleProvider('select_account', loginHint));
+                clearSilentSecondaryGoogleAttempt();
                 return true;
             } catch (secAuthErr) {
                 console.warn('Login Google no projeto secundario falhou:', secAuthErr);
                 updateFirebaseStatus(`Historico recente indisponivel no projeto secundario. ${getGoogleAuthErrorMessage(secAuthErr)}`, 'warn', true);
                 allowSecondary = false;
+                return false;
+            }
+        }
+
+        /**
+         * Tenta autenticar silenciosamente no projeto SECUNDÁRIO do Firebase
+         * (onde vivem estoque e requisições recentes), usando o mesmo mecanismo
+         * de redirect silencioso (prompt: 'none') já usado para o projeto
+         * principal. Sem isso, um navegador que NUNCA tenha passado pelo login
+         * manual (popup) fica permanentemente sem acesso ao projeto secundário —
+         * mesmo com a conta Google correta já logada no projeto principal — e
+         * por isso o estoque aparece sempre vazio nesse computador, mesmo
+         * quando ele existe de verdade.
+         */
+        async function trySilentSecondaryGoogleAuth() {
+            await secondaryAuthInitPromise;
+            if (secondaryAuth.currentUser) return false;
+            if (!auth.currentUser) return false; // só faz sentido depois do login principal
+
+            const attemptState = sessionStorage.getItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY);
+            if (attemptState === 'pending' || attemptState === 'failed') {
+                return false; // já tentamos nesta sessão de navegador; evita loop de redirects
+            }
+
+            sessionStorage.setItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY, 'pending');
+            try {
+                const loginHint = auth.currentUser.email || '';
+                await signInWithRedirect(secondaryAuth, buildGoogleProvider('none', loginHint));
+                return true; // pagina vai navegar para o Google e voltar
+            } catch (err) {
+                console.warn('Tentativa silenciosa de login no projeto secundario falhou ao iniciar:', err);
+                sessionStorage.setItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY, 'failed');
+                return false;
+            }
+        }
+
+        /**
+         * Processa o retorno do redirect silencioso do projeto secundário
+         * (equivalente a processRedirectAuthResult, mas para secondaryAuth).
+         */
+        async function processSecondaryRedirectAuthResult() {
+            try {
+                const result = await getRedirectResult(secondaryAuth);
+                if (!result) {
+                    if (sessionStorage.getItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY) === 'pending') {
+                        sessionStorage.setItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY, 'failed');
+                    }
+                    return false;
+                }
+                clearSilentSecondaryGoogleAttempt();
+                return true;
+            } catch (error) {
+                console.warn('Erro ao concluir autenticacao secundaria por redirect:', error);
+                sessionStorage.setItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY, 'failed');
                 return false;
             }
         }
@@ -2117,6 +2188,16 @@
                 stockFirestoreDb = secondaryDb;
                 await secondaryAuthInitPromise;
                 if (!secondaryAuth.currentUser) {
+                    // Antes de desistir, tenta autenticar silenciosamente no projeto
+                    // secundário (sem popup, sem clique) — resolve o caso de
+                    // computadores que nunca passaram pelo login manual e por
+                    // isso ficavam permanentemente sem ver o estoque.
+                    const startedSecondarySilentAuth = await trySilentSecondaryGoogleAuth();
+                    if (startedSecondarySilentAuth) {
+                        // A página vai navegar para o Google e voltar; interrompe
+                        // aqui — a continuação acontece no próximo carregamento.
+                        return true;
+                    }
                     allowSecondary = false;
                 }
                 try {
@@ -2291,10 +2372,15 @@
                 loadingStock.classList.remove('hidden');
                 unsubStock = onSnapshot(stockLocationsSecondaryCollection, s => {
                     allStockLocationsDocs = s.docs.sort((a, b) => (a.data().address || '').localeCompare(b.data().address || ''));
+                    stockDataConfirmedLoaded = true;
                     debouncedRender('stock', () => {
                         renderStock();
                         renderItems();
                         loadingStock.classList.add('hidden');
+                        // Se o requisitante já tinha selecionado um item enquanto o
+                        // estoque ainda carregava, corrige o painel automaticamente
+                        // assim que os dados reais chegarem.
+                        refreshSelectedItemStockBalance();
                     }, 400);
                 }, err => {
                     console.warn('Snapshot de estoque do projeto secundario indisponivel:', err);
@@ -2737,6 +2823,53 @@
         if (!formListenersAttached) {
             formListenersAttached = true;
 
+            // ── Botão "Tentar verificar novamente" (painel de saldo desconhecido) ──
+            // Usa um clique real do usuário, então pode abrir popup com segurança
+            // (diferente da tentativa silenciosa automática, que usa redirect).
+            const stockRetryBtn = document.getElementById('stock-balance-retry-btn');
+            if (stockRetryBtn) {
+                stockRetryBtn.addEventListener('click', async () => {
+                    stockRetryBtn.disabled = true;
+                    const originalHtml = stockRetryBtn.innerHTML;
+                    stockRetryBtn.textContent = 'Verificando...';
+                    try {
+                        if (!auth.currentUser) {
+                            // Nem o projeto principal está autenticado ainda —
+                            // aciona o fluxo normal de conexão.
+                            await setupAuthAndFirestore(true);
+                        } else if (!secondaryAuth.currentUser) {
+                            // Projeto principal ok, mas o projeto do estoque não.
+                            // Popup interativo — permitido pois veio de um clique real.
+                            const ok = await ensureSecondaryGoogleAuth(true);
+                            if (ok) {
+                                allowSecondary = true;
+                                try {
+                                    await getDocs(query(stockLocationsSecondaryCollection, limit(1)));
+                                    allowSecondaryStock = true;
+                                    stockLocationsCollection = stockLocationsSecondaryCollection;
+                                    stockLocationsReadCollection = stockLocationsSecondaryCollection;
+                                    stockFirestoreDb = secondaryDb;
+                                    startRealtimeListeners();
+                                } catch (permErr) {
+                                    console.warn('Ainda sem permissao no estoque apos nova tentativa:', permErr);
+                                    updatePermissionStatus(permErr);
+                                }
+                            }
+                        } else {
+                            // Ambas as sessões já existem — só faltava o listener
+                            // do estoque terminar de carregar; garante que está ativo.
+                            startRealtimeListeners();
+                        }
+                    } catch (err) {
+                        console.warn('Erro ao tentar reconectar o estoque:', err);
+                    } finally {
+                        refreshSelectedItemStockBalance();
+                        stockRetryBtn.disabled = false;
+                        stockRetryBtn.innerHTML = originalHtml;
+                    }
+                });
+            }
+
             // ── Campos que não devem conter espaços ──────────────────────────
             // Remove espaços em tempo real, tanto ao digitar quanto ao colar.
             const noSpaceIds = [
@@ -2821,17 +2954,25 @@
                     const requestedQty = Number(requisitionForm.quantity.value);
 
                     // Segunda linha de defesa: verifica saldo no momento do envio
-                    // (o saldo pode ter mudado desde que o item foi selecionado)
+                    // (o saldo pode ter mudado desde que o item foi selecionado).
+                    // Nunca se cria requisição sem confirmar estoque de verdade —
+                    // se os dados de estoque não estão confirmados nesta sessão
+                    // (problema de conexão), o envio é bloqueado aqui também,
+                    // mesmo que o botão já devesse estar desabilitado pela UI.
+                    if (!stockDataConfirmedLoaded) {
+                        updateStockBalanceUI(0, false);
+                        throw new Error('Não foi possível confirmar o estoque deste item. Tente novamente em alguns instantes.');
+                    }
                     const currentStock = allStockLocationsDocs.reduce((sum, loc) => {
                         const d = loc.data();
                         return d.itemCode === item.code ? sum + (d.quantity || 0) : sum;
                     }, 0);
                     if (currentStock <= 0) {
-                        updateStockBalanceUI(0);
+                        updateStockBalanceUI(0, true);
                         throw new Error('Este item não possui saldo em estoque no momento.');
                     }
                     if (requestedQty > currentStock) {
-                        updateStockBalanceUI(currentStock);
+                        updateStockBalanceUI(currentStock, true);
                         throw new Error(`Quantidade solicitada (${requestedQty}) supera o saldo atual (${currentStock}).`);
                     }
 
@@ -4807,6 +4948,14 @@
             itemSearchDropdown.classList.add('active');
         }
         
+        // Indica se já recebemos ao menos uma resposta real do Firestore para o
+        // estoque nesta sessão do navegador. Enquanto for false, NÃO podemos
+        // afirmar "sem estoque" — só podemos dizer "não foi possível verificar".
+        // Isso evita o falso positivo que ocorre em computadores onde a sessão
+        // do projeto secundário do Firebase (onde o estoque vive) nunca chega
+        // a se autenticar silenciosamente.
+        let stockDataConfirmedLoaded = false;
+
         function selectItem(doc) {
             const data = doc.data();
             const optionValue = JSON.stringify({ id: doc.id, code: data.code, description: data.description });
@@ -4821,19 +4970,38 @@
             itemSearchDropdown.classList.remove('active');
             itemSearchDropdown.innerHTML = '';
 
-            // ── Calcular saldo em estoque ──────────────────────────────────────
+            refreshSelectedItemStockBalance();
+        }
+
+        /**
+         * Recalcula e redesenha o painel de saldo para o item atualmente
+         * selecionado no formulário de requisição. Chamada tanto ao selecionar
+         * um item quanto quando novos dados de estoque chegam do Firestore
+         * (para "curar" automaticamente um painel que estava em estado
+         * "não foi possível verificar" assim que a conexão se resolver).
+         */
+        function refreshSelectedItemStockBalance() {
+            if (!itemSelect.value) return; // nenhum item selecionado no momento
+            let itemCode;
+            try {
+                itemCode = JSON.parse(itemSelect.value).code;
+            } catch (_) {
+                return;
+            }
+
             const totalStock = allStockLocationsDocs.reduce((sum, loc) => {
                 const d = loc.data();
-                return canonAddr(d.address || '') !== '' && d.itemCode === data.code
+                return canonAddr(d.address || '') !== '' && d.itemCode === itemCode
                     ? sum + (d.quantity || 0)
                     : sum;
             }, 0);
 
-            updateStockBalanceUI(totalStock);
+            updateStockBalanceUI(totalStock, stockDataConfirmedLoaded);
         }
 
-        function updateStockBalanceUI(totalStock) {
+        function updateStockBalanceUI(totalStock, dataConfirmed) {
             const balanceInfo    = document.getElementById('stock-balance-info');
+            const unknownEl      = document.getElementById('stock-balance-unknown');
             const emptyEl        = document.getElementById('stock-balance-empty');
             const okEl           = document.getElementById('stock-balance-ok');
             const exceededEl     = document.getElementById('stock-balance-exceeded');
@@ -4841,12 +5009,31 @@
             const submitBtn      = requisitionForm.querySelector('button[type="submit"]');
 
             balanceInfo.classList.remove('hidden');
+            unknownEl.classList.add('hidden');
             emptyEl.classList.add('hidden');
             okEl.classList.add('hidden');
             exceededEl.classList.add('hidden');
 
+            if (!dataConfirmed) {
+                // Ainda não temos confirmação real do estoque (carregando ou sem
+                // conexão com o projeto de estoque). Não afirmamos "sem saldo"
+                // — seria uma informação falsa — mas também NÃO liberamos o
+                // envio: nunca se cria requisição sem confirmar estoque de
+                // verdade. Fica bloqueado com um aviso honesto + botão de
+                // tentar novamente; o painel se corrige sozinho assim que os
+                // dados reais chegarem (ver refreshSelectedItemStockBalance).
+                unknownEl.classList.remove('hidden');
+                qtyInput.value = '';
+                qtyInput.disabled = true;
+                qtyInput.removeAttribute('max');
+                qtyInput._stockMax = null;
+                submitBtn.disabled = true;
+                submitBtn.title = 'Aguardando confirmação do estoque';
+                return;
+            }
+
             if (totalStock <= 0) {
-                // Sem saldo — bloqueia totalmente
+                // Sem saldo CONFIRMADO — bloqueia totalmente
                 emptyEl.classList.remove('hidden');
                 qtyInput.value = '';
                 qtyInput.max = 0;
@@ -5000,6 +5187,7 @@
 
             updateFirebaseStatus('Verificando sessao do Firebase...', 'info', true);
             await processRedirectAuthResult();
+            await processSecondaryRedirectAuthResult();
 
             onAuthStateChanged(auth, async (user) => {
                 if (isHandlingAuthState) return;
