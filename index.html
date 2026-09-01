@@ -1407,14 +1407,23 @@
         }
 
         /**
-         * Tenta autenticar silenciosamente no projeto SECUNDÁRIO do Firebase
-         * (onde vivem estoque e requisições recentes), usando o mesmo mecanismo
-         * de redirect silencioso (prompt: 'none') já usado para o projeto
-         * principal. Sem isso, um navegador que NUNCA tenha passado pelo login
-         * manual (popup) fica permanentemente sem acesso ao projeto secundário —
-         * mesmo com a conta Google correta já logada no projeto principal — e
-         * por isso o estoque aparece sempre vazio nesse computador, mesmo
-         * quando ele existe de verdade.
+         * Tenta autenticar automaticamente no projeto SECUNDÁRIO do Firebase
+         * (onde vivem estoque e requisições recentes), via redirect, para
+         * qualquer navegador que ainda não tenha essa sessão — sem exigir que
+         * a pessoa clique em nada.
+         *
+         * IMPORTANTE: usamos prompt 'select_account' (com login_hint da conta
+         * já logada no projeto principal, o que faz o Google pular a lista de
+         * contas) em vez de 'none'. O prompt 'none' só funciona quando aquela
+         * conta Google JÁ deu consentimento a este projeto alguma vez antes —
+         * e a maioria dos funcionários (que não são admin) nunca passou pelo
+         * popup de login manual, então nunca geraram esse consentimento. Com
+         * 'select_account', se o consentimento já existir o redirect volta
+         * quase instantâneo (mesma experiência de antes); se for a primeira
+         * vez para aquela conta, o Google mostra uma tela de permissão UMA
+         * ÚNICA VEZ (não é bloqueada por bloqueador de pop-up, pois é
+         * navegação de página inteira, não uma pop-up) — depois disso a
+         * conta fica autorizada permanentemente, em qualquer computador.
          */
         async function trySilentSecondaryGoogleAuth() {
             await secondaryAuthInitPromise;
@@ -1429,10 +1438,10 @@
             sessionStorage.setItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY, 'pending');
             try {
                 const loginHint = auth.currentUser.email || '';
-                await signInWithRedirect(secondaryAuth, buildGoogleProvider('none', loginHint));
+                await signInWithRedirect(secondaryAuth, buildGoogleProvider('select_account', loginHint));
                 return true; // pagina vai navegar para o Google e voltar
             } catch (err) {
-                console.warn('Tentativa silenciosa de login no projeto secundario falhou ao iniciar:', err);
+                console.warn('Tentativa de login automatico no projeto secundario falhou ao iniciar:', err);
                 sessionStorage.setItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY, 'failed');
                 return false;
             }
