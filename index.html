@@ -1377,11 +1377,6 @@
             sessionStorage.removeItem(FIREBASE_REDIRECT_MODE_KEY);
         }
 
-        const SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY = 'firebaseSilentGoogleAttemptSecondary';
-        function clearSilentSecondaryGoogleAttempt() {
-            sessionStorage.removeItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY);
-        }
-
         async function ensureSecondaryGoogleAuth(interactive = false) {
             await secondaryAuthInitPromise;
 
@@ -1396,75 +1391,11 @@
             try {
                 const loginHint = auth.currentUser.email || '';
                 await signInWithPopup(secondaryAuth, buildGoogleProvider('select_account', loginHint));
-                clearSilentSecondaryGoogleAttempt();
                 return true;
             } catch (secAuthErr) {
                 console.warn('Login Google no projeto secundario falhou:', secAuthErr);
                 updateFirebaseStatus(`Historico recente indisponivel no projeto secundario. ${getGoogleAuthErrorMessage(secAuthErr)}`, 'warn', true);
                 allowSecondary = false;
-                return false;
-            }
-        }
-
-        /**
-         * Tenta autenticar automaticamente no projeto SECUNDÁRIO do Firebase
-         * (onde vivem estoque e requisições recentes), via redirect, para
-         * qualquer navegador que ainda não tenha essa sessão — sem exigir que
-         * a pessoa clique em nada.
-         *
-         * IMPORTANTE: usamos prompt 'select_account' (com login_hint da conta
-         * já logada no projeto principal, o que faz o Google pular a lista de
-         * contas) em vez de 'none'. O prompt 'none' só funciona quando aquela
-         * conta Google JÁ deu consentimento a este projeto alguma vez antes —
-         * e a maioria dos funcionários (que não são admin) nunca passou pelo
-         * popup de login manual, então nunca geraram esse consentimento. Com
-         * 'select_account', se o consentimento já existir o redirect volta
-         * quase instantâneo (mesma experiência de antes); se for a primeira
-         * vez para aquela conta, o Google mostra uma tela de permissão UMA
-         * ÚNICA VEZ (não é bloqueada por bloqueador de pop-up, pois é
-         * navegação de página inteira, não uma pop-up) — depois disso a
-         * conta fica autorizada permanentemente, em qualquer computador.
-         */
-        async function trySilentSecondaryGoogleAuth() {
-            await secondaryAuthInitPromise;
-            if (secondaryAuth.currentUser) return false;
-            if (!auth.currentUser) return false; // só faz sentido depois do login principal
-
-            const attemptState = sessionStorage.getItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY);
-            if (attemptState === 'pending' || attemptState === 'failed') {
-                return false; // já tentamos nesta sessão de navegador; evita loop de redirects
-            }
-
-            sessionStorage.setItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY, 'pending');
-            try {
-                const loginHint = auth.currentUser.email || '';
-                await signInWithRedirect(secondaryAuth, buildGoogleProvider('select_account', loginHint));
-                return true; // pagina vai navegar para o Google e voltar
-            } catch (err) {
-                console.warn('Tentativa de login automatico no projeto secundario falhou ao iniciar:', err);
-                sessionStorage.setItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY, 'failed');
-                return false;
-            }
-        }
-
-        /**
-         * Processa o retorno do redirect silencioso do projeto secundário
-         * (equivalente a processRedirectAuthResult, mas para secondaryAuth).
-         */
-        async function processSecondaryRedirectAuthResult() {
-            try {
-                const result = await getRedirectResult(secondaryAuth);
-                if (!result) {
-                    if (sessionStorage.getItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY) === 'pending') {
-                        sessionStorage.setItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY, 'failed');
-                    }
-                    return false;
-                }
-                clearSilentSecondaryGoogleAttempt();
-                return true;
-            } catch (error) {
-                console.warn('Erro ao concluir autenticacao secundaria por redirect:', error);
-                sessionStorage.setItem(SECONDARY_SILENT_GOOGLE_ATTEMPT_KEY, 'failed');
                 return false;
             }
         }
@@ -2204,16 +2135,14 @@
                 stockFirestoreDb = secondaryDb;
                 await secondaryAuthInitPromise;
                 if (!secondaryAuth.currentUser) {
-                    // Antes de desistir, tenta autenticar silenciosamente no projeto
-                    // secundário (sem popup, sem clique) — resolve o caso de
-                    // computadores que nunca passaram pelo login manual e por
-                    // isso ficavam permanentemente sem ver o estoque.
-                    const startedSecondarySilentAuth = await trySilentSecondaryGoogleAuth();
-                    if (startedSecondarySilentAuth) {
-                        // A página vai navegar para o Google e voltar; interrompe
-                        // aqui — a continuação acontece no próximo carregamento.
-                        return true;
-                    }
+                    // NÃO tentamos mais reconectar automaticamente via redirect aqui:
+                    // isso causava um loop de recarregamentos completos da página
+                    // (cada um reiniciando todos os listeners do Firestore do zero),
+                    // multiplicando as leituras e estourando a cota do projeto.
+                    // A reconexão agora só acontece por um clique real da pessoa
+                    // (botão "Tentar verificar novamente" no formulário de
+                    // requisição, ou o login do admin), usando popup — que nunca
+                    // recarrega a página nem gera esse loop.
                     allowSecondary = false;
                 }
                 try {
@@ -5249,7 +5178,6 @@
 
             updateFirebaseStatus('Verificando sessao do Firebase...', 'info', true);
             await processRedirectAuthResult();
-            await processSecondaryRedirectAuthResult();
 
             onAuthStateChanged(auth, async (user) => {
                 if (isHandlingAuthState) return;
