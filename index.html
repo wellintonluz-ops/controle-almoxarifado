@@ -2083,6 +2083,15 @@
         const shouldForceGoogleAtStartup = isLoggedIn;
 
         async function setupAuthAndFirestore(forceGoogleLogin = false) {
+            // Já está tudo pronto e não é um pedido explícito de novo login —
+            // não refaz a configuração (evita retrabalho e não abre listeners
+            // duplicados caso o evento de autenticação dispare mais de uma vez
+            // para o mesmo usuário, o que pode acontecer com sincronização
+            // entre abas).
+            if (isFirestoreReady && !forceGoogleLogin) {
+                return true;
+            }
+
             try {
                 if (!auth.currentUser) {
                     if (forceGoogleLogin) {
@@ -2145,31 +2154,25 @@
                     // recarrega a página nem gera esse loop.
                     allowSecondary = false;
                 }
-                try {
-                    if (allowSecondary) {
-                        await getDocs(query(requisitionsCollectionSecondary, limit(1)));
-                    }
-                } catch (err) {
-                    console.warn('Sem permissão no projeto secundario, usando apenas projeto 1:', err);
-                    updatePermissionStatus(err);
-                    allowSecondary = false;
-                }
 
                 if (!allowSecondary) {
                     console.warn('Projeto secundario sem sessao valida. Historico recente pode nao aparecer neste navegador.');
                 } else {
-                    try {
-                        await getDocs(query(stockLocationsSecondaryCollection, limit(1)));
-                        allowSecondaryStock = true;
-                        stockLocationsCollection = stockLocationsSecondaryCollection;
-                        stockLocationsReadCollection = stockLocationsSecondaryCollection;
-                        stockFirestoreDb = secondaryDb;
-                    } catch (err) {
-                        console.warn('Sem permissão no projeto secundario para estoque:', err);
-                        updatePermissionStatus(err);
-                        allowSecondaryStock = false;
-                        throw err;
-                    }
+                    // Não fazemos mais uma leitura "de teste" (getDocs com limit(1))
+                    // só para verificar permissão antes de assinar os listeners —
+                    // isso gastava leituras extras em TODO carregamento de página,
+                    // mesmo quando tudo já funcionava normalmente. Agora assumimos
+                    // acesso otimisticamente e deixamos o próprio callback de erro
+                    // de cada onSnapshot corrigir allowSecondary/allowSecondaryStock
+                    // se a permissão realmente for negada (ver startRealtimeListeners).
+                    // Importante: isso também corrige um bug em que uma falha aqui
+                    // interrompia a função inteira e nem os listeners que funcionam
+                    // (itens, funcionários, requisições do projeto principal)
+                    // chegavam a ser criados.
+                    allowSecondaryStock = true;
+                    stockLocationsCollection = stockLocationsSecondaryCollection;
+                    stockLocationsReadCollection = stockLocationsSecondaryCollection;
+                    stockFirestoreDb = secondaryDb;
                 }
 
                 isFirestoreReady = true;
@@ -2330,6 +2333,8 @@
                 }, err => {
                     console.warn('Snapshot de estoque do projeto secundario indisponivel:', err);
                     updatePermissionStatus(err);
+                    allowSecondaryStock = false;
+                    if (unsubStock) { unsubStock(); unsubStock = null; }
                     loadingStock.classList.add('hidden');
                 });
             }
