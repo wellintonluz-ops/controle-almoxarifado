@@ -389,6 +389,17 @@
         </div>
     </header>
 
+    <div id="project-connection-bar" class="border-b border-amber-200 bg-amber-50 hidden">
+        <div class="max-w-[1600px] mx-auto px-4 md:px-8 py-2.5 flex flex-wrap items-center gap-2 text-xs">
+            <span class="text-amber-800 font-semibold flex items-center gap-1.5">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+                Conexão de dados incompleta neste navegador:
+            </span>
+            <button id="connect-project1-btn" type="button" class="inline-flex items-center gap-1.5 font-semibold px-3 py-1.5 rounded-lg border transition-colors"></button>
+            <button id="connect-project2-btn" type="button" class="inline-flex items-center gap-1.5 font-semibold px-3 py-1.5 rounded-lg border transition-colors"></button>
+        </div>
+    </div>
+
     <div id="app" class="container mx-auto p-4 md:p-8 max-w-full relative">
         
         <!-- Conteúdo da Aba Dashboard -->
@@ -1200,6 +1211,9 @@
         
         const loginLogoutBtn = document.getElementById('login-logout-btn');
         const firebaseStatus = document.getElementById('firebase-status');
+        const projectConnectionBar = document.getElementById('project-connection-bar');
+        const connectProject1Btn = document.getElementById('connect-project1-btn');
+        const connectProject2Btn = document.getElementById('connect-project2-btn');
         const tabDashboard = document.getElementById('tab-dashboard');
         const tabKanban = document.getElementById('tab-kanban');
         const tabLabels = document.getElementById('tab-labels');
@@ -2773,7 +2787,103 @@
                 renderStock();
                 renderEmployees();
             }
+
+            updateProjectConnectionButtons();
         }
+
+        /**
+         * Conecta o projeto PRINCIPAL (Projeto 1) via popup do Google.
+         * Usado pelo botão dedicado "Conectar Projeto 1".
+         */
+        async function connectPrimaryProject() {
+            if (auth.currentUser) return true;
+            return await setupAuthAndFirestore(true);
+        }
+
+        /**
+         * Conecta o projeto SECUNDÁRIO (Projeto 2 — estoque e histórico recente)
+         * via popup do Google. Requer que o Projeto 1 já esteja conectado (usa
+         * o e-mail da mesma conta como dica de login). Não faz nenhuma leitura
+         * de "sondagem" — assume acesso otimisticamente e deixa o próprio
+         * listener do estoque se autocorrigir caso a permissão seja negada
+         * (ver o callback de erro em startRealtimeListeners).
+         */
+        async function connectSecondaryProject() {
+            if (secondaryAuth.currentUser) {
+                startRealtimeListeners(); // garante que os listeners já estão de pé
+                return true;
+            }
+            if (!auth.currentUser) {
+                alert('Conecte o Projeto 1 primeiro — o Projeto 2 usa a mesma conta Google.');
+                return false;
+            }
+            const ok = await ensureSecondaryGoogleAuth(true);
+            if (ok) {
+                allowSecondary = true;
+                allowSecondaryStock = true;
+                stockLocationsCollection = stockLocationsSecondaryCollection;
+                stockLocationsReadCollection = stockLocationsSecondaryCollection;
+                stockFirestoreDb = secondaryDb;
+                startRealtimeListeners();
+            }
+            return ok;
+        }
+
+        /**
+         * Atualiza a barra de conexão dos dois projetos (mostra/oculta e pinta
+         * cada botão conforme o estado real de auth.currentUser / secondaryAuth.currentUser).
+         * A barra inteira some quando os dois projetos já estão conectados.
+         */
+        function updateProjectConnectionButtons() {
+            const p1Connected = !!auth.currentUser;
+            const p2Connected = !!secondaryAuth.currentUser;
+
+            projectConnectionBar.classList.toggle('hidden', p1Connected && p2Connected);
+
+            const connectedCls = ['bg-green-100', 'border-green-300', 'text-green-800', 'cursor-default'];
+            const disconnectedCls = ['bg-white', 'border-amber-300', 'text-amber-800', 'hover:bg-amber-100'];
+
+            function paint(btn, connected, label) {
+                btn.classList.remove(...connectedCls, ...disconnectedCls);
+                btn.classList.add(...(connected ? connectedCls : disconnectedCls));
+                btn.disabled = connected;
+                btn.innerHTML = connected
+                    ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>${label}: conectado`
+                    : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>Conectar Projeto ${label}`;
+            }
+
+            paint(connectProject1Btn, p1Connected, '1');
+            paint(connectProject2Btn, p2Connected, '2');
+        }
+
+        connectProject1Btn.addEventListener('click', async () => {
+            if (auth.currentUser) return;
+            connectProject1Btn.disabled = true;
+            connectProject1Btn.textContent = 'Conectando...';
+            try {
+                await connectPrimaryProject();
+            } catch (err) {
+                console.warn('Falha ao conectar Projeto 1:', err);
+                alert('Não foi possível conectar o Projeto 1: ' + (err?.userMessage || err?.message || err));
+            } finally {
+                updateProjectConnectionButtons();
+            }
+        });
+
+        connectProject2Btn.addEventListener('click', async () => {
+            if (secondaryAuth.currentUser) return;
+            connectProject2Btn.disabled = true;
+            connectProject2Btn.textContent = 'Conectando...';
+            try {
+                await connectSecondaryProject();
+            } catch (err) {
+                console.warn('Falha ao conectar Projeto 2:', err);
+                alert('Não foi possível conectar o Projeto 2: ' + (err?.message || err));
+            } finally {
+                updateProjectConnectionButtons();
+                refreshSelectedItemStockBalance();
+            }
+        });
 
         // Adicionar event listeners apenas uma vez
         if (!formListenersAttached) {
@@ -2790,35 +2900,14 @@
                     stockRetryBtn.textContent = 'Verificando...';
                     try {
                         if (!auth.currentUser) {
-                            // Nem o projeto principal está autenticado ainda —
-                            // aciona o fluxo normal de conexão.
-                            await setupAuthAndFirestore(true);
-                        } else if (!secondaryAuth.currentUser) {
-                            // Projeto principal ok, mas o projeto do estoque não.
-                            // Popup interativo — permitido pois veio de um clique real.
-                            const ok = await ensureSecondaryGoogleAuth(true);
-                            if (ok) {
-                                allowSecondary = true;
-                                try {
-                                    await getDocs(query(stockLocationsSecondaryCollection, limit(1)));
-                                    allowSecondaryStock = true;
-                                    stockLocationsCollection = stockLocationsSecondaryCollection;
-                                    stockLocationsReadCollection = stockLocationsSecondaryCollection;
-                                    stockFirestoreDb = secondaryDb;
-                                    startRealtimeListeners();
-                                } catch (permErr) {
-                                    console.warn('Ainda sem permissao no estoque apos nova tentativa:', permErr);
-                                    updatePermissionStatus(permErr);
-                                }
-                            }
+                            await connectPrimaryProject();
                         } else {
-                            // Ambas as sessões já existem — só faltava o listener
-                            // do estoque terminar de carregar; garante que está ativo.
-                            startRealtimeListeners();
+                            await connectSecondaryProject();
                         }
                     } catch (err) {
                         console.warn('Erro ao tentar reconectar o estoque:', err);
                     } finally {
+                        updateProjectConnectionButtons();
                         refreshSelectedItemStockBalance();
                         stockRetryBtn.disabled = false;
                         stockRetryBtn.innerHTML = originalHtml;
