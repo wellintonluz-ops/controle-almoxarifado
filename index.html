@@ -623,11 +623,11 @@
                      <div class="surface-card p-6 mt-8">
                         <h2 class="text-xl font-semibold mb-4">Transferência de Estoque</h2>
                         <form id="stock-transfer-form">
-                            <div class="mb-4">
-                                <label for="transfer-item-select" class="block text-sm font-medium text-gray-700">Item</label>
-                                <select id="transfer-item-select" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
-                                    <option value="">Selecione um item...</option>
-                                </select>
+                            <div class="mb-4 item-search-container">
+                                <label for="transfer-item-select-search" class="block text-sm font-medium text-gray-700">Item</label>
+                                <input type="text" id="transfer-item-select-search" placeholder="Digite o código ou a descrição para pesquisar..." autocomplete="off" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                                <div id="transfer-item-select-dropdown" class="item-search-dropdown"></div>
+                                <input type="hidden" id="transfer-item-select">
                             </div>
                             <div class="mb-4">
                                 <label for="transfer-from-address" class="block text-sm font-medium text-gray-700">Endereço de Origem</label>
@@ -656,11 +656,11 @@
                      <div class="surface-card p-6 mt-8">
                         <h2 class="text-xl font-semibold mb-4">Baixa de Estoque</h2>
                         <form id="stock-out-form">
-                            <div class="mb-4">
-                                <label for="stock-out-item-select" class="block text-sm font-medium text-gray-700">Item</label>
-                                <select id="stock-out-item-select" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
-                                    <option value="">Selecione um item...</option>
-                                </select>
+                            <div class="mb-4 item-search-container">
+                                <label for="stock-out-item-select-search" class="block text-sm font-medium text-gray-700">Item</label>
+                                <input type="text" id="stock-out-item-select-search" placeholder="Digite o código ou a descrição para pesquisar..." autocomplete="off" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                                <div id="stock-out-item-select-dropdown" class="item-search-dropdown"></div>
+                                <input type="hidden" id="stock-out-item-select">
                             </div>
                             <div class="mb-4">
                                 <label for="stock-out-address" class="block text-sm font-medium text-gray-700">Endereço</label>
@@ -1231,7 +1231,9 @@
         const loadingStock = document.getElementById('loading-stock'), stockListBody = document.getElementById('stock-list'), noStockItems = document.getElementById('no-stock-items'), stockEntryForm = document.getElementById('stock-entry-form'), stockItemSelect = document.getElementById('stock-item-select'), submitStockEntryBtn = document.getElementById('submit-stock-entry-btn'), stockItemSearchInput = document.getElementById('stock-item-search'), clearStockPanelBtn = document.getElementById('clear-stock-panel-btn');
         const stockItemSelectSearchInput = document.getElementById('stock-item-select-search'), stockItemSelectDropdown = document.getElementById('stock-item-select-dropdown');
         const stockTransferForm = document.getElementById('stock-transfer-form'), transferItemSelect = document.getElementById('transfer-item-select'), transferFromAddress = document.getElementById('transfer-from-address'), transferToAddress = document.getElementById('transfer-to-address'), transferQuantity = document.getElementById('transfer-quantity'), submitTransferBtn = document.getElementById('submit-transfer-btn'), originQuantity = document.getElementById('origin-quantity');
+        const transferItemSelectSearchInput = document.getElementById('transfer-item-select-search'), transferItemSelectDropdown = document.getElementById('transfer-item-select-dropdown');
         const stockOutForm = document.getElementById('stock-out-form'), stockOutItemSelect = document.getElementById('stock-out-item-select'), stockOutAddress = document.getElementById('stock-out-address'), stockOutQuantity = document.getElementById('stock-out-quantity'), submitStockOutBtn = document.getElementById('submit-stock-out-btn'), stockOutAvailable = document.getElementById('stock-out-available');
+        const stockOutItemSelectSearchInput = document.getElementById('stock-out-item-select-search'), stockOutItemSelectDropdown = document.getElementById('stock-out-item-select-dropdown');
         const locationSelectModal = document.getElementById('location-select-modal'), locationsList = document.getElementById('locations-list'), locationSelectError = document.getElementById('location-select-error'), confirmLocationSelectionBtn = document.getElementById('confirm-location-selection'), cancelLocationSelectionBtn = document.getElementById('cancel-location-selection'), modalLocationReqId = document.getElementById('modal-location-req-id');
 
         // Estado da seleção de múltiplos locais de saída (entrega de requisição)
@@ -2677,55 +2679,13 @@
         };
         
         const populateSelects = () => {
-            // O item da Entrada Manual (stock-item-select) agora é um input
-            // oculto controlado pela pesquisa (selectStockItem/handleBarcodeSearch)
-            // e não precisa mais ser repopulado aqui como <select>.
-            const currentTransferVal = transferItemSelect.value;
-            const currentStockOutVal = stockOutItemSelect.value;
-
-            // IMPORTANTE: as opções são criadas via DOM (createElement + propriedades),
-            // nunca via concatenação de string em innerHTML. Descrições de itens podem
-            // conter aspas simples (ex.: `10''` para polegadas), e montar
-            // `<option value='${json}'>` como texto quebra o HTML nesses casos,
-            // corrompendo o value do option e causando erro ao ler/parsear o JSON
-            // de volta ("Unterminated string in JSON").
-            const transferFrag = document.createDocumentFragment();
-            const stockOutFrag = document.createDocumentFragment();
-
-            const blankTransferOpt = document.createElement('option');
-            blankTransferOpt.value = '';
-            blankTransferOpt.textContent = 'Selecione um item...';
-            transferFrag.appendChild(blankTransferOpt);
-
-            const blankStockOutOpt = document.createElement('option');
-            blankStockOutOpt.value = '';
-            blankStockOutOpt.textContent = 'Selecione um item...';
-            stockOutFrag.appendChild(blankStockOutOpt);
-
-            allItemsDocs.forEach(doc => {
-                const data = doc.data();
-                // Não adicionar itens inativos ao select
-                if (data.active === false) return;
-                const optionValue = JSON.stringify({ id: doc.id, code: data.code, description: data.description });
-
-                const transferOpt = document.createElement('option');
-                transferOpt.value = optionValue;
-                transferOpt.textContent = data.description;
-                transferFrag.appendChild(transferOpt);
-
-                const stockOutOpt = document.createElement('option');
-                stockOutOpt.value = optionValue;
-                stockOutOpt.textContent = data.description;
-                stockOutFrag.appendChild(stockOutOpt);
-            });
-
-            transferItemSelect.innerHTML = '';
-            transferItemSelect.appendChild(transferFrag);
-            stockOutItemSelect.innerHTML = '';
-            stockOutItemSelect.appendChild(stockOutFrag);
-
-            transferItemSelect.value = currentTransferVal;
-            stockOutItemSelect.value = currentStockOutVal;
+            // Os campos de item da Entrada Manual, Transferência e Baixa
+            // (stock-item-select, transfer-item-select, stock-out-item-select)
+            // agora são inputs ocultos controlados pela pesquisa
+            // (selectStockItem/selectTransferItem/selectStockOutItem) e não
+            // precisam mais ser repopulados aqui como <select>. Isso também
+            // evita o antigo bug de descrições com aspas simples (ex.: `10''`
+            // para polegadas) corrompendo o value quando montado via innerHTML.
 
             const currentReq = requesterSelect.value;
             const currentUserSelect = userSelect.value;
@@ -3263,7 +3223,12 @@
             stockTransferForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 if (!isLoggedIn) return;
-                
+
+                if (!transferItemSelect.value) {
+                    alert('Selecione um item para transferir.');
+                    return;
+                }
+
                 const itemData = JSON.parse(transferItemSelect.value);
                 const fromLocationId = transferFromAddress.value;
                 const toAddressRaw = transferToAddress.value.trim();
@@ -4925,26 +4890,28 @@
             }
         });
         
-        // Event listener para popular endereços de origem ao selecionar item na transferência
-        transferItemSelect.addEventListener('change', () => {
+        // Popula os endereços de origem disponíveis para o item selecionado na
+        // transferência. Chamada tanto ao selecionar um item via pesquisa
+        // (selectTransferItem) quanto para manter o comportamento anterior.
+        function refreshTransferAddressesForSelectedItem() {
             transferFromAddress.innerHTML = '<option value="">Selecione a origem...</option>';
             originQuantity.textContent = '';
             transferToAddress.value = '';
             transferQuantity.value = '';
-            
+
             if (!transferItemSelect.value) return;
-            
+
             try {
                 const itemData = JSON.parse(transferItemSelect.value);
-                const locations = allStockLocationsDocs.filter(doc => 
+                const locations = allStockLocationsDocs.filter(doc =>
                     doc.data().itemCode === itemData.code && doc.data().quantity > 0
                 );
-                
+
                 if (locations.length === 0) {
                     transferFromAddress.innerHTML = '<option value="">Nenhum estoque disponível</option>';
                     return;
                 }
-                
+
                 locations.forEach(locDoc => {
                     const locData = locDoc.data();
                     transferFromAddress.innerHTML += `<option value="${locDoc.id}">${locData.address} (Qtd: ${locData.quantity})</option>`;
@@ -4952,8 +4919,8 @@
             } catch (e) {
                 console.error("Erro ao carregar localizações:", e);
             }
-        });
-        
+        }
+
         // Event listener para mostrar quantidade disponível no endereço de origem
         transferFromAddress.addEventListener('change', () => {
             originQuantity.textContent = '';
@@ -4970,8 +4937,9 @@
             }
         });
 
-        // Baixa: popular endereços disponíveis do item
-        stockOutItemSelect.addEventListener('change', () => {
+        // Baixa: popula endereços disponíveis do item selecionado. Chamada tanto
+        // pela pesquisa (selectStockOutItem) quanto para manter o comportamento anterior.
+        function refreshStockOutAddressesForSelectedItem() {
             stockOutAddress.innerHTML = '<option value="">Selecione o endereço...</option>';
             stockOutAvailable.textContent = '';
             stockOutQuantity.value = '';
@@ -4995,7 +4963,7 @@
             } catch (e) {
                 console.error('Erro ao carregar endereços para baixa:', e);
             }
-        });
+        }
 
         // Baixa: exibe quantidade disponível selecionada
         stockOutAddress.addEventListener('change', () => {
@@ -5027,11 +4995,29 @@
             });
         }
 
+        // Pesquisa de itens na Transferência de Estoque
+        if (transferItemSelectSearchInput) {
+            transferItemSelectSearchInput.addEventListener('input', handleTransferItemSelectSearch);
+            transferItemSelectSearchInput.addEventListener('focus', () => {
+                handleTransferItemSelectSearch(); // Sempre mostra a lista ao focar
+            });
+        }
+
+        // Pesquisa de itens na Baixa de Estoque
+        if (stockOutItemSelectSearchInput) {
+            stockOutItemSelectSearchInput.addEventListener('input', handleStockOutItemSelectSearch);
+            stockOutItemSelectSearchInput.addEventListener('focus', () => {
+                handleStockOutItemSelectSearch(); // Sempre mostra a lista ao focar
+            });
+        }
+
         // Fechar dropdown ao clicar fora
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.item-search-container')) {
                 itemSearchDropdown.classList.remove('active');
                 if (stockItemSelectDropdown) stockItemSelectDropdown.classList.remove('active');
+                if (transferItemSelectDropdown) transferItemSelectDropdown.classList.remove('active');
+                if (stockOutItemSelectDropdown) stockOutItemSelectDropdown.classList.remove('active');
             }
         });
         
@@ -5158,6 +5144,116 @@
             stockItemSelectDropdown.innerHTML = '';
 
             refreshStockEntryBtn();
+        }
+
+        // Pesquisa de itens para a Transferência de Estoque (mesmo padrão da
+        // Entrada Manual, alimentando o input oculto #transfer-item-select).
+        function handleTransferItemSelectSearch() {
+            if (!transferItemSelectSearchInput || !transferItemSelectDropdown) return;
+            const searchTerm = transferItemSelectSearchInput.value.trim().toLowerCase();
+
+            let filteredItems;
+            if (!searchTerm) {
+                filteredItems = allItemsDocs.filter(doc => doc.data().active !== false);
+            } else {
+                filteredItems = allItemsDocs.filter(doc => {
+                    const data = doc.data();
+                    if (data.active === false) return false;
+                    const code = (data.code || '').toLowerCase();
+                    const description = (data.description || '').toLowerCase();
+                    return code.includes(searchTerm) || description.includes(searchTerm);
+                });
+            }
+
+            transferItemSelectDropdown.innerHTML = '';
+
+            if (filteredItems.length === 0) {
+                transferItemSelectDropdown.innerHTML = '<div class="item-search-option" style="color: #9ca3af; cursor: default;">Nenhum item encontrado</div>';
+                transferItemSelectDropdown.classList.add('active');
+                return;
+            }
+
+            filteredItems.forEach(doc => {
+                const data = doc.data();
+                const optionDiv = document.createElement('div');
+                optionDiv.className = 'item-search-option';
+                optionDiv.innerHTML = `
+                    <div class="item-search-option-code">[${data.code}]</div>
+                    <div class="item-search-option-desc">${data.description}</div>
+                `;
+                optionDiv.addEventListener('click', () => selectTransferItem(doc));
+                transferItemSelectDropdown.appendChild(optionDiv);
+            });
+
+            transferItemSelectDropdown.classList.add('active');
+        }
+
+        function selectTransferItem(doc) {
+            const data = doc.data();
+            const optionValue = JSON.stringify({ id: doc.id, code: data.code, description: data.description });
+
+            transferItemSelect.value = optionValue;
+            transferItemSelectSearchInput.value = `[${data.code}] ${data.description}`;
+
+            transferItemSelectDropdown.classList.remove('active');
+            transferItemSelectDropdown.innerHTML = '';
+
+            refreshTransferAddressesForSelectedItem();
+        }
+
+        // Pesquisa de itens para a Baixa de Estoque (mesmo padrão da Entrada
+        // Manual, alimentando o input oculto #stock-out-item-select).
+        function handleStockOutItemSelectSearch() {
+            if (!stockOutItemSelectSearchInput || !stockOutItemSelectDropdown) return;
+            const searchTerm = stockOutItemSelectSearchInput.value.trim().toLowerCase();
+
+            let filteredItems;
+            if (!searchTerm) {
+                filteredItems = allItemsDocs.filter(doc => doc.data().active !== false);
+            } else {
+                filteredItems = allItemsDocs.filter(doc => {
+                    const data = doc.data();
+                    if (data.active === false) return false;
+                    const code = (data.code || '').toLowerCase();
+                    const description = (data.description || '').toLowerCase();
+                    return code.includes(searchTerm) || description.includes(searchTerm);
+                });
+            }
+
+            stockOutItemSelectDropdown.innerHTML = '';
+
+            if (filteredItems.length === 0) {
+                stockOutItemSelectDropdown.innerHTML = '<div class="item-search-option" style="color: #9ca3af; cursor: default;">Nenhum item encontrado</div>';
+                stockOutItemSelectDropdown.classList.add('active');
+                return;
+            }
+
+            filteredItems.forEach(doc => {
+                const data = doc.data();
+                const optionDiv = document.createElement('div');
+                optionDiv.className = 'item-search-option';
+                optionDiv.innerHTML = `
+                    <div class="item-search-option-code">[${data.code}]</div>
+                    <div class="item-search-option-desc">${data.description}</div>
+                `;
+                optionDiv.addEventListener('click', () => selectStockOutItem(doc));
+                stockOutItemSelectDropdown.appendChild(optionDiv);
+            });
+
+            stockOutItemSelectDropdown.classList.add('active');
+        }
+
+        function selectStockOutItem(doc) {
+            const data = doc.data();
+            const optionValue = JSON.stringify({ id: doc.id, code: data.code, description: data.description });
+
+            stockOutItemSelect.value = optionValue;
+            stockOutItemSelectSearchInput.value = `[${data.code}] ${data.description}`;
+
+            stockOutItemSelectDropdown.classList.remove('active');
+            stockOutItemSelectDropdown.innerHTML = '';
+
+            refreshStockOutAddressesForSelectedItem();
         }
 
         /**
