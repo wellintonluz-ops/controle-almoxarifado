@@ -588,11 +588,11 @@
                                 <label for="stock-item-search" class="block text-sm font-medium text-gray-700">Bipar ou Pesquisar por Código</label>
                                 <input type="text" id="stock-item-search" placeholder="Bipe o código de barras aqui..." class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
                             </div>
-                            <div class="mb-4">
-                                <label for="stock-item-select" class="block text-sm font-medium text-gray-700">Ou Selecione o Item</label>
-                                <select id="stock-item-select" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
-                                    <option value="">Selecione um item...</option>
-                                </select>
+                            <div class="mb-4 item-search-container">
+                                <label for="stock-item-select-search" class="block text-sm font-medium text-gray-700">Ou Pesquise o Item</label>
+                                <input type="text" id="stock-item-select-search" placeholder="Digite o código ou a descrição para pesquisar..." autocomplete="off" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
+                                <div id="stock-item-select-dropdown" class="item-search-dropdown"></div>
+                                <input type="hidden" id="stock-item-select">
                             </div>
                             <div class="mb-4">
                                 <label for="stock-entry-depot" class="block text-sm font-medium text-gray-700">Depósito</label>
@@ -1229,6 +1229,7 @@
         const statusModal = document.getElementById('status-modal'), statusSelect = document.getElementById('status-select'), modalRequisitionId = document.getElementById('modal-requisition-id'), modalOriginalStatus = document.getElementById('modal-original-status'), cancelUpdateBtn = document.getElementById('cancel-update'), confirmUpdateBtn = document.getElementById('confirm-update');
         const loginModal = document.getElementById('login-modal'), loginForm = document.getElementById('login-form'), cancelLoginBtn = document.getElementById('cancel-login'), loginError = document.getElementById('login-error');
         const loadingStock = document.getElementById('loading-stock'), stockListBody = document.getElementById('stock-list'), noStockItems = document.getElementById('no-stock-items'), stockEntryForm = document.getElementById('stock-entry-form'), stockItemSelect = document.getElementById('stock-item-select'), submitStockEntryBtn = document.getElementById('submit-stock-entry-btn'), stockItemSearchInput = document.getElementById('stock-item-search'), clearStockPanelBtn = document.getElementById('clear-stock-panel-btn');
+        const stockItemSelectSearchInput = document.getElementById('stock-item-select-search'), stockItemSelectDropdown = document.getElementById('stock-item-select-dropdown');
         const stockTransferForm = document.getElementById('stock-transfer-form'), transferItemSelect = document.getElementById('transfer-item-select'), transferFromAddress = document.getElementById('transfer-from-address'), transferToAddress = document.getElementById('transfer-to-address'), transferQuantity = document.getElementById('transfer-quantity'), submitTransferBtn = document.getElementById('submit-transfer-btn'), originQuantity = document.getElementById('origin-quantity');
         const stockOutForm = document.getElementById('stock-out-form'), stockOutItemSelect = document.getElementById('stock-out-item-select'), stockOutAddress = document.getElementById('stock-out-address'), stockOutQuantity = document.getElementById('stock-out-quantity'), submitStockOutBtn = document.getElementById('submit-stock-out-btn'), stockOutAvailable = document.getElementById('stock-out-available');
         const locationSelectModal = document.getElementById('location-select-modal'), locationsList = document.getElementById('locations-list'), locationSelectError = document.getElementById('location-select-error'), confirmLocationSelectionBtn = document.getElementById('confirm-location-selection'), cancelLocationSelectionBtn = document.getElementById('cancel-location-selection'), modalLocationReqId = document.getElementById('modal-location-req-id');
@@ -2676,25 +2677,53 @@
         };
         
         const populateSelects = () => {
-            // Popular apenas o select de estoque (o item-select agora é hidden e usa pesquisa)
-            const currentStockVal = stockItemSelect.value;
+            // O item da Entrada Manual (stock-item-select) agora é um input
+            // oculto controlado pela pesquisa (selectStockItem/handleBarcodeSearch)
+            // e não precisa mais ser repopulado aqui como <select>.
             const currentTransferVal = transferItemSelect.value;
             const currentStockOutVal = stockOutItemSelect.value;
-            
-            stockItemSelect.innerHTML = `<option value="">Selecione um item...</option>`;
-            transferItemSelect.innerHTML = `<option value="">Selecione um item...</option>`;
-            stockOutItemSelect.innerHTML = `<option value="">Selecione um item...</option>`;
-            
+
+            // IMPORTANTE: as opções são criadas via DOM (createElement + propriedades),
+            // nunca via concatenação de string em innerHTML. Descrições de itens podem
+            // conter aspas simples (ex.: `10''` para polegadas), e montar
+            // `<option value='${json}'>` como texto quebra o HTML nesses casos,
+            // corrompendo o value do option e causando erro ao ler/parsear o JSON
+            // de volta ("Unterminated string in JSON").
+            const transferFrag = document.createDocumentFragment();
+            const stockOutFrag = document.createDocumentFragment();
+
+            const blankTransferOpt = document.createElement('option');
+            blankTransferOpt.value = '';
+            blankTransferOpt.textContent = 'Selecione um item...';
+            transferFrag.appendChild(blankTransferOpt);
+
+            const blankStockOutOpt = document.createElement('option');
+            blankStockOutOpt.value = '';
+            blankStockOutOpt.textContent = 'Selecione um item...';
+            stockOutFrag.appendChild(blankStockOutOpt);
+
             allItemsDocs.forEach(doc => {
                 const data = doc.data();
                 // Não adicionar itens inativos ao select
                 if (data.active === false) return;
                 const optionValue = JSON.stringify({ id: doc.id, code: data.code, description: data.description });
-                stockItemSelect.innerHTML += `<option value='${optionValue}'>${data.description}</option>`;
-                transferItemSelect.innerHTML += `<option value='${optionValue}'>${data.description}</option>`;
-                stockOutItemSelect.innerHTML += `<option value='${optionValue}'>${data.description}</option>`;
+
+                const transferOpt = document.createElement('option');
+                transferOpt.value = optionValue;
+                transferOpt.textContent = data.description;
+                transferFrag.appendChild(transferOpt);
+
+                const stockOutOpt = document.createElement('option');
+                stockOutOpt.value = optionValue;
+                stockOutOpt.textContent = data.description;
+                stockOutFrag.appendChild(stockOutOpt);
             });
-            stockItemSelect.value = currentStockVal;
+
+            transferItemSelect.innerHTML = '';
+            transferItemSelect.appendChild(transferFrag);
+            stockOutItemSelect.innerHTML = '';
+            stockOutItemSelect.appendChild(stockOutFrag);
+
             transferItemSelect.value = currentTransferVal;
             stockOutItemSelect.value = currentStockOutVal;
 
@@ -2720,7 +2749,17 @@
             const address = document.getElementById('stock-entry-address')?.value?.trim();
             return !!item && !!depot && !!address;
         }
-        
+
+        // Validação em tempo real da Entrada Manual. Declarada no escopo do
+        // módulo (fora do bloco "if (!formListenersAttached)") para poder ser
+        // chamada tanto pelos listeners de formulário quanto pela pesquisa de
+        // item (selectStockItem/handleBarcodeSearch), que vivem fora desse bloco.
+        function refreshStockEntryBtn() {
+            if (submitStockEntryBtn) {
+                submitStockEntryBtn.disabled = !(isLoggedIn && isFirestoreReady) || !stockEntryFieldsValid();
+            }
+        }
+
         function updateUIForAuth() {
             const gestaoRecebimentoBtn = document.getElementById('gestao-recebimento-btn');
             const isReady = isFirestoreReady;
@@ -3217,11 +3256,6 @@
             });
 
             // Validação em tempo real da Entrada Manual
-            function refreshStockEntryBtn() {
-                if (submitStockEntryBtn) {
-                    submitStockEntryBtn.disabled = !(isLoggedIn && isFirestoreReady) || !stockEntryFieldsValid();
-                }
-            }
             stockItemSelect.addEventListener('change', refreshStockEntryBtn);
             document.getElementById('stock-entry-depot').addEventListener('change', refreshStockEntryBtn);
             document.getElementById('stock-entry-address').addEventListener('input', refreshStockEntryBtn);
@@ -4984,11 +5018,20 @@
         itemSearchInput.addEventListener('focus', () => {
             handleItemSearch(); // Sempre mostra a lista ao focar
         });
-        
+
+        // Pesquisa de itens na Entrada Manual de Estoque ("Ou Pesquise o Item")
+        if (stockItemSelectSearchInput) {
+            stockItemSelectSearchInput.addEventListener('input', handleStockItemSelectSearch);
+            stockItemSelectSearchInput.addEventListener('focus', () => {
+                handleStockItemSelectSearch(); // Sempre mostra a lista ao focar
+            });
+        }
+
         // Fechar dropdown ao clicar fora
         document.addEventListener('click', (e) => {
             if (!e.target.closest('.item-search-container')) {
                 itemSearchDropdown.classList.remove('active');
+                if (stockItemSelectDropdown) stockItemSelectDropdown.classList.remove('active');
             }
         });
         
@@ -5056,6 +5099,65 @@
             itemSearchDropdown.innerHTML = '';
 
             refreshSelectedItemStockBalance();
+        }
+
+        // Pesquisa de itens para a Entrada Manual de Estoque (mesmo padrão do
+        // campo de pesquisa da Requisição, mas alimentando o input oculto
+        // #stock-item-select em vez do #item-select).
+        function handleStockItemSelectSearch() {
+            if (!stockItemSelectSearchInput || !stockItemSelectDropdown) return;
+            const searchTerm = stockItemSelectSearchInput.value.trim().toLowerCase();
+
+            let filteredItems;
+            if (!searchTerm) {
+                filteredItems = allItemsDocs.filter(doc => doc.data().active !== false);
+            } else {
+                filteredItems = allItemsDocs.filter(doc => {
+                    const data = doc.data();
+                    if (data.active === false) return false;
+                    const code = (data.code || '').toLowerCase();
+                    const description = (data.description || '').toLowerCase();
+                    return code.includes(searchTerm) || description.includes(searchTerm);
+                });
+            }
+
+            stockItemSelectDropdown.innerHTML = '';
+
+            if (filteredItems.length === 0) {
+                stockItemSelectDropdown.innerHTML = '<div class="item-search-option" style="color: #9ca3af; cursor: default;">Nenhum item encontrado</div>';
+                stockItemSelectDropdown.classList.add('active');
+                return;
+            }
+
+            filteredItems.forEach(doc => {
+                const data = doc.data();
+                const optionDiv = document.createElement('div');
+                optionDiv.className = 'item-search-option';
+                optionDiv.innerHTML = `
+                    <div class="item-search-option-code">[${data.code}]</div>
+                    <div class="item-search-option-desc">${data.description}</div>
+                `;
+                optionDiv.addEventListener('click', () => selectStockItem(doc));
+                stockItemSelectDropdown.appendChild(optionDiv);
+            });
+
+            stockItemSelectDropdown.classList.add('active');
+        }
+
+        function selectStockItem(doc) {
+            const data = doc.data();
+            // Guardamos o value como propriedade JS (não como atributo HTML),
+            // então aspas simples/duplas na descrição (ex.: `10''`) não quebram
+            // nada — evita o erro "Unterminated string in JSON" ao ler de volta.
+            const optionValue = JSON.stringify({ id: doc.id, code: data.code, description: data.description });
+
+            stockItemSelect.value = optionValue;
+            stockItemSelectSearchInput.value = `[${data.code}] ${data.description}`;
+
+            stockItemSelectDropdown.classList.remove('active');
+            stockItemSelectDropdown.innerHTML = '';
+
+            refreshStockEntryBtn();
         }
 
         /**
@@ -5172,13 +5274,19 @@
                 const itemData = foundItemDoc.data();
                 const optionValue = JSON.stringify({ id: foundItemDoc.id, code: itemData.code, description: itemData.description });
                 stockItemSelect.value = optionValue;
-                
+                if (stockItemSelectSearchInput) {
+                    stockItemSelectSearchInput.value = `[${itemData.code}] ${itemData.description}`;
+                }
+
                 stockItemSearchInput.value = '';
+                refreshStockEntryBtn();
                 document.getElementById('stock-entry-address').focus();
             } else {
                 alert('Item com o termo "' + rawTerm + '" não encontrado.');
                 stockItemSelect.value = '';
+                if (stockItemSelectSearchInput) stockItemSelectSearchInput.value = '';
                 stockItemSearchInput.value = '';
+                refreshStockEntryBtn();
                 stockItemSearchInput.focus();
             }
         }
