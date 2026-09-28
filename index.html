@@ -483,6 +483,11 @@
                     <!-- Painel de saldo em estoque — aparece após selecionar item -->
                     <div id="stock-balance-info" class="md:col-span-6 hidden">
                         <!-- estado: não foi possível verificar (SEM dados de estoque carregados/confirmados) -->
+                        <!-- estado: verificando saldo (consulta em andamento) -->
+                        <div id="stock-balance-checking" class="hidden flex items-center gap-3 bg-slate-50 border border-slate-200 text-slate-600 rounded-xl px-4 py-3 text-sm font-medium">
+                            <div class="loader" style="width:18px;height:18px;border-width:2px;"></div>
+                            <span>Verificando saldo em estoque...</span>
+                        </div>
                         <div id="stock-balance-unknown" class="hidden flex items-start gap-3 bg-slate-100 border border-slate-300 text-slate-700 rounded-xl px-4 py-3 text-sm font-medium">
                             <svg class="flex-shrink-0 mt-0.5" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
                             <div class="flex-1">
@@ -529,6 +534,10 @@
                 <div class="flex flex-col md:flex-row md:space-x-4 mb-4">
                     <div class="flex-1"><label for="filter-status" class="block text-sm font-medium text-gray-700">Filtrar por Status</label><select id="filter-status" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm rounded-md"><option>Todos</option><option>Pendente</option><option>Rejeitado</option><option>Entregue</option></select></div>
                     <div class="flex-1 mt-4 md:mt-0"><label for="filter-requester" class="block text-sm font-medium text-gray-700">Filtrar por Solicitante</label><input type="text" id="filter-requester" placeholder="Digite o nome..." class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
+                </div>
+                <div id="req-history-bar" class="flex flex-wrap items-center justify-between gap-2 mb-4 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600">
+                    <span id="req-history-text">Exibindo requisições pendentes e as movimentadas nos últimos 30 dias.</span>
+                    <button type="button" id="req-history-btn" class="font-semibold text-blue-700 hover:text-blue-900 border border-blue-300 hover:bg-blue-50 rounded-md px-2.5 py-1">Carregar histórico completo</button>
                 </div>
                 <div class="overflow-x-auto"><table class="min-w-full divide-y divide-gray-200"><thead class="bg-gray-50"><tr><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Solicitante</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qtd.</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Justificativa</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Motivo da Rejeição</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Última Atualização</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th></tr></thead><tbody id="requisitions-list" class="bg-white divide-y divide-gray-200"></tbody></table><p id="no-requisitions" class="text-center text-gray-500 py-8 hidden">Nenhuma requisição encontrada.</p></div>
                 <div id="requisitions-pagination" class="flex justify-between items-center mt-4 hidden">
@@ -1153,7 +1162,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, where, runTransaction, writeBatch, getDocs, orderBy, limit, setDoc, increment, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, serverTimestamp, query, where, runTransaction, writeBatch, getDocs, orderBy, limit, setDoc, increment, getDoc, getDocsFromCache, getCountFromServer } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
         // ************************************************************************************
@@ -1316,6 +1325,7 @@
         let monthlyItemSearchTerm = '';
         let allowSecondary = true;
         let allowSecondaryStock = false;
+        let kanbanViewRequested = false; // aba Equipamentos já foi aberta nesta sessão
         let stockFirestoreDb = db;
         let hasProcessedRedirectResult = false;
 
@@ -1533,8 +1543,182 @@
             return allStockLocationsDocs.find(stockDoc => stockDoc.id === stockLocationId) || null;
         }
 
+        // ── Requisições: leitura em "janela" ─────────────────────────────────
+        // Antes, TODO computador que abria o site baixava o histórico INTEIRO de
+        // requisições dos dois projetos (cada documento = 1 leitura), e isso se
+        // repetia a cada nova abertura depois de ~30 min. Como o histórico só
+        // cresce, esse era o maior consumo de cota.
+        // Agora o tempo real acompanha apenas:
+        //   • todas as requisições PENDENTES (qualquer idade), e
+        //   • as que tiveram status alterado nos últimos RECENT_REQUISITIONS_DAYS dias.
+        // O histórico completo só é carregado sob demanda (aba Dashboard,
+        // Exportar, ou o botão "Carregar histórico completo").
+        const RECENT_REQUISITIONS_DAYS = 30;
+        const reqListenerMaps = {
+            old: { pending: new Map(), recent: new Map() },
+            new: { pending: new Map(), recent: new Map() }
+        };
+        // Histórico carregado sob demanda + últimas versões conhecidas de docs
+        // que saíram de uma consulta em tempo real (evita "piscar" na tabela).
+        const reqFallbackMaps = { old: new Map(), new: new Map() };
+        // Requisições recém-criadas neste navegador, até o listener confirmá-las.
+        const reqOptimistic = { old: new Map(), new: new Map() };
+        let fullRequisitionHistoryLoaded = false;
+        let fullRequisitionHistoryLoading = null;
+        // Controle de "primeira resposta do servidor" dos listeners de requisição,
+        // usado para só comparar cache x servidor depois que estiverem sincronizados.
+        const reqListenersServerSynced = new Set();
+
+        function rebuildRequisitionSource(source) {
+            const merged = new Map();
+            reqFallbackMaps[source].forEach((d, id) => merged.set(id, d));
+            reqOptimistic[source].forEach((d, id) => merged.set(id, d));
+            reqListenerMaps[source].recent.forEach((d, id) => merged.set(id, d));
+            reqListenerMaps[source].pending.forEach((d, id) => merged.set(id, d));
+            const arr = [...merged.values()];
+            if (source === 'old') oldRequisitionsDocs = arr; else newRequisitionsDocs = arr;
+        }
+
+        function clearRequisitionSource(source) {
+            reqListenerMaps[source].pending.clear();
+            reqListenerMaps[source].recent.clear();
+            reqFallbackMaps[source].clear();
+            reqOptimistic[source].clear();
+            if (source === 'old') oldRequisitionsDocs = []; else newRequisitionsDocs = [];
+        }
+
         function syncRequisitionState() {
+            rebuildRequisitionSource('old');
+            rebuildRequisitionSource('new');
             allRequisitionsDocs = [...newRequisitionsDocs, ...oldRequisitionsDocs].sort((a, b) => getRequisitionSortTime(b.data()) - getRequisitionSortTime(a.data()));
+        }
+
+        /**
+         * Assina, para um projeto, as duas consultas em tempo real da janela de
+         * requisições (pendentes + alteradas recentemente). Devolve UMA função
+         * que cancela as duas, para manter a mesma interface de antes.
+         */
+        function subscribeRequisitionWindow(source, coll, onError) {
+            const cutoff = new Date(Date.now() - RECENT_REQUISITIONS_DAYS * 86400000);
+            const queries = {
+                pending: query(coll, where('status', '==', 'Pendente')),
+                recent: query(coll, where('statusUpdatedAt', '>=', cutoff))
+            };
+            const unsubs = Object.entries(queries).map(([key, q]) => onSnapshot(q, s => {
+                const map = reqListenerMaps[source][key];
+                s.docChanges().forEach(ch => {
+                    const id = ch.doc.id;
+                    if (ch.type === 'removed') {
+                        // Saiu desta consulta (ex.: deixou de ser pendente). Guarda a
+                        // última versão até a outra consulta entregar a atualizada.
+                        const prev = map.get(id);
+                        if (prev) reqFallbackMaps[source].set(id, prev);
+                        map.delete(id);
+                    } else {
+                        map.set(id, wrapRequisitionDoc(ch.doc, source));
+                        reqOptimistic[source].delete(id);
+                    }
+                });
+                if (!s.metadata.fromCache) reqListenersServerSynced.add(`${source}:${key}`);
+                debouncedRender('requisitions', () => {
+                    refreshRequisitionViews();
+                    loadingRequisitions.classList.add('hidden');
+                }, 200);
+            }, onError));
+            return () => {
+                unsubs.forEach(u => u());
+                reqListenersServerSynced.delete(`${source}:pending`);
+                reqListenersServerSynced.delete(`${source}:recent`);
+            };
+        }
+
+        function waitForRequisitionListenersSynced(timeoutMs = 8000) {
+            const needed = ['old:pending', 'old:recent'];
+            if (allowSecondary && unsubRequisitionsSecondary) needed.push('new:pending', 'new:recent');
+            return new Promise(resolve => {
+                const started = Date.now();
+                (function check() {
+                    if (needed.every(k => reqListenersServerSynced.has(k)) || Date.now() - started > timeoutMs) return resolve();
+                    setTimeout(check, 150);
+                })();
+            });
+        }
+
+        /**
+         * Busca uma coleção inteira gastando o mínimo de leituras possível.
+         * Se o histórico completo já foi baixado do servidor recentemente neste
+         * navegador (dentro da janela de tempo real), usa o cache local
+         * (IndexedDB, custo zero) — desde que uma CONTAGEM no servidor (custa
+         * 1 leitura a cada 1000 documentos) confirme que o cache está completo.
+         * Caso contrário, baixa do servidor normalmente.
+         */
+        async function fetchCollectionCacheFirst(coll, storageKey) {
+            const maxAgeMs = (RECENT_REQUISITIONS_DAYS - 2) * 86400000;
+            let lastFull = 0;
+            try { lastFull = Number(localStorage.getItem(storageKey) || 0); } catch (_) {}
+            if (lastFull && Date.now() - lastFull < maxAgeMs) {
+                try {
+                    const [cached, countSnap] = await Promise.all([getDocsFromCache(coll), getCountFromServer(coll)]);
+                    if (cached.size > 0 && cached.size === countSnap.data().count) {
+                        return cached.docs;
+                    }
+                } catch (err) {
+                    console.warn('Cache do histórico indisponível, buscando no servidor:', err);
+                }
+            }
+            const snap = await getDocs(coll);
+            try { localStorage.setItem(storageKey, String(Date.now())); } catch (_) {}
+            return snap.docs;
+        }
+
+        async function loadFullRequisitionHistory() {
+            if (fullRequisitionHistoryLoaded) return;
+            if (fullRequisitionHistoryLoading) return fullRequisitionHistoryLoading;
+            if (!isFirestoreReady || !requisitionsCollectionPrimary) return;
+
+            fullRequisitionHistoryLoading = (async () => {
+                updateRequisitionHistoryBar('loading');
+                try {
+                    await waitForRequisitionListenersSynced();
+                    const targets = [['old', requisitionsCollectionPrimary, `reqHistoryFullAt_${appId}`]];
+                    if (allowSecondary && requisitionsCollectionSecondary) {
+                        targets.push(['new', requisitionsCollectionSecondary, `reqHistoryFullAt_${secondaryAppId}`]);
+                    }
+                    for (const [source, coll, key] of targets) {
+                        const docs = await fetchCollectionCacheFirst(coll, key);
+                        const fallback = reqFallbackMaps[source];
+                        docs.forEach(d => fallback.set(d.id, wrapRequisitionDoc(d, source)));
+                    }
+                    fullRequisitionHistoryLoaded = true;
+                    refreshRequisitionViews();
+                    updateRequisitionHistoryBar('loaded');
+                } catch (err) {
+                    console.error('Falha ao carregar histórico completo de requisições:', err);
+                    updateRequisitionHistoryBar('error');
+                }
+            })().finally(() => { fullRequisitionHistoryLoading = null; });
+            return fullRequisitionHistoryLoading;
+        }
+
+        function updateRequisitionHistoryBar(state) {
+            const textEl = document.getElementById('req-history-text');
+            const btn = document.getElementById('req-history-btn');
+            if (!textEl || !btn) return;
+            const st = state || (fullRequisitionHistoryLoaded ? 'loaded' : 'window');
+            if (st === 'loaded') {
+                textEl.textContent = 'Exibindo o histórico completo de requisições.';
+                btn.classList.add('hidden');
+            } else if (st === 'loading') {
+                textEl.textContent = 'Carregando histórico completo...';
+                btn.disabled = true;
+                btn.classList.remove('hidden');
+            } else {
+                textEl.textContent = st === 'error'
+                    ? 'Não foi possível carregar o histórico completo. Tente novamente.'
+                    : `Exibindo requisições pendentes e as movimentadas nos últimos ${RECENT_REQUISITIONS_DAYS} dias.`;
+                btn.disabled = false;
+                btn.classList.remove('hidden');
+            }
         }
 
         function refreshRequisitionViews() {
@@ -1577,7 +1761,7 @@
                             unsubRequisitionsSecondary();
                             unsubRequisitionsSecondary = null;
                         }
-                        newRequisitionsDocs = [];
+                        clearRequisitionSource('new');
                         refreshRequisitionViews();
                         continue;
                     }
@@ -2049,8 +2233,16 @@
         document.addEventListener('DOMContentLoaded', function() {
             const exportBtn = document.getElementById('export-requisitions-btn');
             if (exportBtn) {
-                exportBtn.addEventListener('click', function(e) {
+                exportBtn.addEventListener('click', async function(e) {
                     e.preventDefault();
+                    // A exportação usa o histórico completo (carregado só uma vez).
+                    if (!fullRequisitionHistoryLoaded) {
+                        exportBtn.disabled = true;
+                        const originalText = exportBtn.textContent;
+                        exportBtn.textContent = 'Carregando...';
+                        try { await loadFullRequisitionHistory(); }
+                        finally { exportBtn.disabled = false; exportBtn.textContent = originalText; }
+                    }
                     // Pega os filtros atuais
                     const statusFilter = filterStatus.value;
                     const requesterFilter = normalizeText(filterRequester.value.trim());
@@ -2260,37 +2452,25 @@
         function startRealtimeListeners() {
             if (!isFirestoreReady) return;
 
-            // Requisições primárias — tempo real, debounce curto (200ms)
+            // Requisições primárias — tempo real só na janela (pendentes + recentes)
             if (!unsubRequisitionsPrimary) {
                 loadingRequisitions.classList.remove('hidden');
-                unsubRequisitionsPrimary = onSnapshot(requisitionsCollectionPrimary, s => {
-                    oldRequisitionsDocs = s.docs.map(d => wrapRequisitionDoc(d, 'old'));
-                    debouncedRender('requisitions', () => {
-                        refreshRequisitionViews();
-                        loadingRequisitions.classList.add('hidden');
-                    }, 200);
-                }, err => {
+                unsubRequisitionsPrimary = subscribeRequisitionWindow('old', requisitionsCollectionPrimary, err => {
                     console.warn('Snapshot do projeto principal indisponivel:', err);
                     updatePermissionStatus(err);
                     loadingRequisitions.classList.add('hidden');
                 });
             }
 
-            // Requisições secundárias — tempo real, debounce curto
+            // Requisições secundárias — tempo real só na janela (pendentes + recentes)
             if (!unsubRequisitionsSecondary && allowSecondary) {
                 loadingRequisitions.classList.remove('hidden');
-                unsubRequisitionsSecondary = onSnapshot(requisitionsCollectionSecondary, s => {
-                    newRequisitionsDocs = s.docs.map(d => wrapRequisitionDoc(d, 'new'));
-                    debouncedRender('requisitions', () => {
-                        refreshRequisitionViews();
-                        loadingRequisitions.classList.add('hidden');
-                    }, 200);
-                }, err => {
+                unsubRequisitionsSecondary = subscribeRequisitionWindow('new', requisitionsCollectionSecondary, err => {
                     console.warn('Snapshot secundario indisponivel, mantendo somente o principal:', err);
                     updatePermissionStatus(err);
                     allowSecondary = false;
                     if (unsubRequisitionsSecondary) { unsubRequisitionsSecondary(); unsubRequisitionsSecondary = null; }
-                    newRequisitionsDocs = [];
+                    clearRequisitionSource('new');
                     debouncedRender('requisitions', () => { refreshRequisitionViews(); loadingRequisitions.classList.add('hidden'); }, 200);
                 });
             }
@@ -2332,8 +2512,11 @@
                 });
             }
 
-            // Estoque — debounce 400ms para absorver ajustes de múltiplos endereços
-            if (!unsubStock && allowSecondaryStock) {
+            // Estoque COMPLETO — só para o admin (abas Estoque/Itens/Catálogo e a
+            // entrega de requisições precisam de todos os endereços). Quem só faz
+            // requisição não baixa mais a coleção inteira: o saldo do item
+            // escolhido é consultado sob demanda (ver ensureSelectedItemStockListener).
+            if (!unsubStock && allowSecondaryStock && isLoggedIn) {
                 loadingStock.classList.remove('hidden');
                 unsubStock = onSnapshot(stockLocationsSecondaryCollection, s => {
                     allStockLocationsDocs = s.docs.sort((a, b) => (a.data().address || '').localeCompare(b.data().address || ''));
@@ -2356,8 +2539,9 @@
                 });
             }
 
-            // Kanban — debounce 300ms
-            if (!unsubKanban) {
+            // Kanban — para o admin sempre (precisa ver pedidos de empréstimo);
+            // para os demais, só depois que a aba Equipamentos é aberta.
+            if (!unsubKanban && (isLoggedIn || kanbanViewRequested)) {
                 unsubKanban = onSnapshot(getReadCollection(kanbanEquipmentsCollection, kanbanEquipmentsReadCollection), s => {
                     allKanbanEquipmentsDocs = s.docs;
                     debouncedRender('kanban', renderKanbanBoard, 300);
@@ -2373,6 +2557,20 @@
                 if (fn) fn();
             });
             unsubRequisitionsPrimary = unsubRequisitionsSecondary = unsubEmployees = unsubItems = unsubStock = unsubKanban = null;
+            stopSelectedItemStockListener();
+            clearRequisitionSource('old');
+            clearRequisitionSource('new');
+            fullRequisitionHistoryLoaded = false;
+            stockDataConfirmedLoaded = false;
+            updateRequisitionHistoryBar();
+        }
+
+        // Ao sair do modo admin, para de acompanhar o estoque completo neste
+        // navegador (volta para a consulta sob demanda do item selecionado).
+        function stopFullStockListener() {
+            if (unsubStock) { unsubStock(); unsubStock = null; }
+            allStockLocationsDocs = [];
+            stockDataConfirmedLoaded = false;
         }
         
         const updatePendingBadge = () => {
@@ -2880,7 +3078,7 @@
                 alert('Não foi possível conectar o Projeto 2: ' + (err?.message || err));
             } finally {
                 updateProjectConnectionButtons();
-                refreshSelectedItemStockBalance();
+                retrySelectedItemStock();
             }
         });
 
@@ -2907,7 +3105,7 @@
                         console.warn('Erro ao tentar reconectar o estoque:', err);
                     } finally {
                         updateProjectConnectionButtons();
-                        refreshSelectedItemStockBalance();
+                        retrySelectedItemStock();
                         stockRetryBtn.disabled = false;
                         stockRetryBtn.innerHTML = originalHtml;
                     }
@@ -3003,14 +3201,11 @@
                     // se os dados de estoque não estão confirmados nesta sessão
                     // (problema de conexão), o envio é bloqueado aqui também,
                     // mesmo que o botão já devesse estar desabilitado pela UI.
-                    if (!stockDataConfirmedLoaded) {
+                    if (!isStockConfirmedForCode(item.code)) {
                         updateStockBalanceUI(0, false);
                         throw new Error('Não foi possível confirmar o estoque deste item. Tente novamente em alguns instantes.');
                     }
-                    const currentStock = allStockLocationsDocs.reduce((sum, loc) => {
-                        const d = loc.data();
-                        return d.itemCode === item.code ? sum + (d.quantity || 0) : sum;
-                    }, 0);
+                    const currentStock = getStockTotalForCode(item.code);
                     if (currentStock <= 0) {
                         updateStockBalanceUI(0, true);
                         throw new Error('Este item não possui saldo em estoque no momento.');
@@ -3040,11 +3235,10 @@
                         source
                     };
 
-                    if (source === 'new') {
-                        newRequisitionsDocs = [localDoc, ...newRequisitionsDocs.filter(doc => doc.id !== newRequisitionRef.id)];
-                    } else {
-                        oldRequisitionsDocs = [localDoc, ...oldRequisitionsDocs.filter(doc => doc.id !== newRequisitionRef.id)];
-                    }
+                    // Mostra na hora; o listener de pendentes assume assim que confirmar.
+                    const alreadyListed = reqListenerMaps[source].pending.has(newRequisitionRef.id)
+                        || reqListenerMaps[source].recent.has(newRequisitionRef.id);
+                    if (!alreadyListed) reqOptimistic[source].set(newRequisitionRef.id, localDoc);
 
                     refreshRequisitionViews();
 
@@ -3689,6 +3883,15 @@
             }
 
             if (newStatus === 'Entregue' && oldStatus !== 'Entregue') {
+                if (!hasFullStockData()) {
+                    // O estoque completo começa a carregar no login do admin;
+                    // não afirmamos "estoque insuficiente" antes dele chegar.
+                    startRealtimeListeners();
+                    alert(allowSecondaryStock
+                        ? 'O estoque ainda está sendo carregado. Aguarde alguns segundos e tente novamente.'
+                        : 'O estoque (Projeto 2) não está conectado neste navegador. Clique em "Conectar Projeto 2" e tente novamente.');
+                    return;
+                }
                 const { itemCode, quantity } = reqDocData;
                 const matchingLocations = allStockLocationsDocs.filter(doc =>
                     doc.data().itemCode === itemCode && (doc.data().quantity || 0) > 0
@@ -4161,7 +4364,9 @@
             if (isLoggedIn) {
                 isLoggedIn = false;
                 sessionStorage.removeItem('isUserLoggedIn'); // Remove o estado de login
+                stopFullStockListener();
                 updateUIForAuth();
+                refreshSelectedItemStockBalance();
                 if (isFirestoreReady) {
                     updateFirebaseStatus('Conectado ao Firebase', 'success', true);
                 } else {
@@ -4200,7 +4405,23 @@
             if (activeView === viewCatalog) {
                 renderCatalog();
             }
+
+            // Equipamentos: o listener só é criado quando a aba é aberta pela
+            // primeira vez (quem nunca abre a aba não gasta leituras com ela).
+            if (activeView === viewKanban && !kanbanViewRequested) {
+                kanbanViewRequested = true;
+                startRealtimeListeners();
+            }
+
+            // Dashboard: gráficos e médias usam o histórico completo.
+            if (activeView === viewDashboard) {
+                loadFullRequisitionHistory();
+            }
         }
+        const reqHistoryBtn = document.getElementById('req-history-btn');
+        if (reqHistoryBtn) reqHistoryBtn.addEventListener('click', () => loadFullRequisitionHistory());
+        updateRequisitionHistoryBar();
+
         const allTabs = [tabDashboard, tabRequisitions, tabStock, tabKanban, tabLabels, tabItems, tabEmployees, tabCatalog];
         const allViews = [viewDashboard, viewRequisitions, viewStock, viewKanban, viewLabels, viewItems, viewEmployees, viewCatalog];
         allTabs.forEach((tab, index) => {
@@ -5263,6 +5484,104 @@
          * (para "curar" automaticamente um painel que estava em estado
          * "não foi possível verificar" assim que a conexão se resolver).
          */
+        // ── Saldo do item selecionado, sob demanda ───────────────────────────
+        // Quem não é admin não assina mais a coleção de estoque inteira. Ao
+        // escolher um item na requisição, assinamos só os endereços DESSE item
+        // (poucas leituras), em tempo real enquanto ele estiver selecionado.
+        const SELECTED_ITEM_STOCK_TIMEOUT_MS = 10000;
+        let selectedItemStockUnsub = null;
+        let selectedItemStockCode = null;
+        let selectedItemStockDocs = [];
+        let selectedItemStockConfirmed = false;
+        let selectedItemStockTimedOut = false;
+        let selectedItemStockTimer = null;
+        let selectedItemStockFailedCode = null;
+
+        function hasFullStockData() {
+            return !!unsubStock && stockDataConfirmedLoaded;
+        }
+
+        function stopSelectedItemStockListener() {
+            if (selectedItemStockUnsub) selectedItemStockUnsub();
+            clearTimeout(selectedItemStockTimer);
+            selectedItemStockUnsub = null;
+            selectedItemStockCode = null;
+            selectedItemStockDocs = [];
+            selectedItemStockConfirmed = false;
+            selectedItemStockTimedOut = false;
+        }
+
+        function ensureSelectedItemStockListener(code) {
+            // Admin com o estoque completo já carregado não precisa de consulta extra.
+            if (hasFullStockData()) { stopSelectedItemStockListener(); return; }
+            if (!code || !isFirestoreReady || !allowSecondaryStock || !stockLocationsSecondaryCollection) {
+                stopSelectedItemStockListener();
+                return;
+            }
+            if (selectedItemStockCode === code && selectedItemStockUnsub) return;
+            if (selectedItemStockFailedCode === code) return; // aguarda "Tentar novamente"
+
+            stopSelectedItemStockListener();
+            selectedItemStockCode = code;
+            selectedItemStockTimer = setTimeout(() => {
+                if (selectedItemStockCode === code && !selectedItemStockConfirmed) {
+                    selectedItemStockTimedOut = true;
+                    refreshSelectedItemStockBalance();
+                }
+            }, SELECTED_ITEM_STOCK_TIMEOUT_MS);
+
+            const q = query(stockLocationsSecondaryCollection, where('itemCode', '==', code));
+            selectedItemStockUnsub = onSnapshot(q, { includeMetadataChanges: true }, s => {
+                if (selectedItemStockCode !== code) return;
+                selectedItemStockDocs = s.docs;
+                // Só consideramos o saldo confirmado quando a resposta vem do
+                // servidor (não apenas do cache local), para nunca liberar uma
+                // requisição com base em dados antigos.
+                if (!s.metadata.fromCache) {
+                    selectedItemStockConfirmed = true;
+                    selectedItemStockTimedOut = false;
+                    clearTimeout(selectedItemStockTimer);
+                }
+                refreshSelectedItemStockBalance();
+            }, err => {
+                console.warn('Não foi possível consultar o saldo do item:', err);
+                updatePermissionStatus(err);
+                if (selectedItemStockCode !== code) return;
+                if (selectedItemStockUnsub) selectedItemStockUnsub();
+                selectedItemStockUnsub = null;
+                selectedItemStockConfirmed = false;
+                selectedItemStockTimedOut = true;
+                clearTimeout(selectedItemStockTimer);
+                // Não tenta de novo sozinho (evita repetir a falha em loop);
+                // nova tentativa só pelo botão "Tentar verificar novamente".
+                selectedItemStockFailedCode = code;
+                refreshSelectedItemStockBalance();
+            });
+        }
+
+        // Chamado pelo botão "Tentar verificar novamente".
+        function retrySelectedItemStock() {
+            selectedItemStockFailedCode = null;
+            stopSelectedItemStockListener();
+            refreshSelectedItemStockBalance();
+        }
+
+        function isStockConfirmedForCode(code) {
+            if (hasFullStockData()) return true;
+            return selectedItemStockCode === code && selectedItemStockConfirmed;
+        }
+
+        function getStockTotalForCode(code) {
+            const source = hasFullStockData() ? allStockLocationsDocs
+                : (selectedItemStockCode === code ? selectedItemStockDocs : []);
+            return source.reduce((sum, loc) => {
+                const d = loc.data();
+                return canonAddr(d.address || '') !== '' && d.itemCode === code
+                    ? sum + (d.quantity || 0)
+                    : sum;
+            }, 0);
+        }
+
         function refreshSelectedItemStockBalance() {
             if (!itemSelect.value) return; // nenhum item selecionado no momento
             let itemCode;
@@ -5272,19 +5591,18 @@
                 return;
             }
 
-            const totalStock = allStockLocationsDocs.reduce((sum, loc) => {
-                const d = loc.data();
-                return canonAddr(d.address || '') !== '' && d.itemCode === itemCode
-                    ? sum + (d.quantity || 0)
-                    : sum;
-            }, 0);
+            ensureSelectedItemStockListener(itemCode);
 
-            updateStockBalanceUI(totalStock, stockDataConfirmedLoaded);
+            const confirmed = isStockConfirmedForCode(itemCode);
+            const checking = !confirmed && !hasFullStockData() && !!selectedItemStockUnsub
+                && selectedItemStockCode === itemCode && !selectedItemStockTimedOut;
+            updateStockBalanceUI(confirmed ? getStockTotalForCode(itemCode) : 0, confirmed, checking);
         }
 
-        function updateStockBalanceUI(totalStock, dataConfirmed) {
+        function updateStockBalanceUI(totalStock, dataConfirmed, checking = false) {
             const balanceInfo    = document.getElementById('stock-balance-info');
             const unknownEl      = document.getElementById('stock-balance-unknown');
+            const checkingEl     = document.getElementById('stock-balance-checking');
             const emptyEl        = document.getElementById('stock-balance-empty');
             const okEl           = document.getElementById('stock-balance-ok');
             const exceededEl     = document.getElementById('stock-balance-exceeded');
@@ -5293,9 +5611,22 @@
 
             balanceInfo.classList.remove('hidden');
             unknownEl.classList.add('hidden');
+            if (checkingEl) checkingEl.classList.add('hidden');
             emptyEl.classList.add('hidden');
             okEl.classList.add('hidden');
             exceededEl.classList.add('hidden');
+
+            if (!dataConfirmed && checking && checkingEl) {
+                // Consulta do saldo em andamento (normalmente menos de 1 segundo).
+                checkingEl.classList.remove('hidden');
+                qtyInput.value = '';
+                qtyInput.disabled = true;
+                qtyInput.removeAttribute('max');
+                qtyInput._stockMax = null;
+                submitBtn.disabled = true;
+                submitBtn.title = 'Verificando saldo em estoque';
+                return;
+            }
 
             if (!dataConfirmed) {
                 // Ainda não temos confirmação real do estoque (carregando ou sem
@@ -5341,6 +5672,7 @@
         }
 
         function clearStockBalanceUI() {
+            stopSelectedItemStockListener();
             const balanceInfo = document.getElementById('stock-balance-info');
             const qtyInput    = document.getElementById('quantity');
             if (balanceInfo) balanceInfo.classList.add('hidden');
