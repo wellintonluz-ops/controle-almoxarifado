@@ -565,9 +565,9 @@
                             <label for="stock-depot-filter" class="block text-sm font-medium text-gray-700 mb-1">Filtrar por Depósito</label>
                             <select id="stock-depot-filter" class="block w-full sm:w-64 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
                                 <option value="">Todos os depósitos</option>
-                                <option value="Almox. Interno">Almox. Interno</option>
-                                <option value="Almox. Porta Pallet">Almox. Porta Pallet</option>
-                                <option value="Almox. Blocado">Almox. Blocado</option>
+                                <option value="Almox.Interno">Almox.Interno</option>
+                                <option value="Almox.PortaPallet">Almox.PortaPallet</option>
+                                <option value="Almox.Blocado">Almox.Blocado</option>
                             </select>
                         </div>
                         <div class="overflow-x-auto">
@@ -607,9 +607,9 @@
                                 <label for="stock-entry-depot" class="block text-sm font-medium text-gray-700">Depósito</label>
                                 <select id="stock-entry-depot" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
                                     <option value="">Selecione o depósito...</option>
-                                    <option value="Almox. Interno">Almox. Interno</option>
-                                    <option value="Almox. Porta Pallet">Almox. Porta Pallet</option>
-                                    <option value="Almox. Blocado">Almox. Blocado</option>
+                                    <option value="Almox.Interno">Almox.Interno</option>
+                                    <option value="Almox.PortaPallet">Almox.PortaPallet</option>
+                                    <option value="Almox.Blocado">Almox.Blocado</option>
                                 </select>
                             </div>
                             <div class="mb-4">
@@ -946,9 +946,9 @@
                 <label for="edit-stock-depot" class="block text-sm font-medium text-gray-700">Depósito</label>
                 <select id="edit-stock-depot" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
                     <option value="">Sem depósito</option>
-                    <option value="Almox. Interno">Almox. Interno</option>
-                    <option value="Almox. Porta Pallet">Almox. Porta Pallet</option>
-                    <option value="Almox. Blocado">Almox. Blocado</option>
+                    <option value="Almox.Interno">Almox.Interno</option>
+                    <option value="Almox.PortaPallet">Almox.PortaPallet</option>
+                    <option value="Almox.Blocado">Almox.Blocado</option>
                 </select>
             </div>
             <div class="mb-4">
@@ -2791,7 +2791,8 @@
                 if (!locData.quantity) return;
 
                 const [depotLabel, addrDisplay] = getParts(locData);
-                if (depotFilter && depotLabel !== depotFilter) return;
+                // Compara sem espaços/maiúsculas: "Almox. Blocado" e "Almox.Blocado" são o mesmo depósito
+                if (depotFilter && canonAddr(depotLabel) !== canonAddr(depotFilter)) return;
 
                 const itemData = item?.data();
                 const description = itemData?.description ?? 'Item não encontrado';
@@ -2835,7 +2836,10 @@
                             document.getElementById('edit-stock-item-code').value = sData.itemCode || '';
                             document.getElementById('edit-stock-description').value = itemDoc ? itemDoc.data().description : '';
                             const [depotVal, addrOnly] = getParts(sData);
-                            document.getElementById('edit-stock-depot').value = depotVal;
+                            // Seleciona o depósito mesmo se o registro antigo tiver espaços no nome
+                            const depotSelect = document.getElementById('edit-stock-depot');
+                            const depotOpt = [...depotSelect.options].find(o => o.value && canonAddr(o.value) === canonAddr(depotVal));
+                            depotSelect.value = depotOpt ? depotOpt.value : depotVal;
                             document.getElementById('edit-stock-address').value = addrOnly;
                             document.getElementById('edit-stock-quantity').value = sData.quantity ?? 0;
                             document.getElementById('edit-stock-safety').value = itemDoc ? (itemDoc.data().safetyStock ?? 0) : 0;
@@ -4454,7 +4458,7 @@
             const itemId     = document.getElementById('edit-stock-item-id').value;
             const newDepot   = document.getElementById('edit-stock-depot').value.trim();
             const newAddrOnly= document.getElementById('edit-stock-address').value.trim();
-            const newAddr    = newDepot ? `${newDepot} - ${newAddrOnly}` : newAddrOnly;
+            const newAddr    = storeAddr(newDepot ? `${newDepot} - ${newAddrOnly}` : newAddrOnly);
             const newQty     = parseInt(document.getElementById('edit-stock-quantity').value, 10);
             const newSafety  = parseInt(document.getElementById('edit-stock-safety').value, 10);
             const errEl      = document.getElementById('edit-stock-error');
