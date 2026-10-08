@@ -536,7 +536,7 @@
                     <div class="flex-1 mt-4 md:mt-0"><label for="filter-requester" class="block text-sm font-medium text-gray-700">Filtrar por Solicitante</label><input type="text" id="filter-requester" placeholder="Digite o nome..." class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"></div>
                 </div>
                 <div id="req-history-bar" class="flex flex-wrap items-center justify-between gap-2 mb-4 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600">
-                    <span id="req-history-text">Exibindo requisições pendentes e as movimentadas nos últimos 30 dias.</span>
+                    <span id="req-history-text">Exibindo requisições pendentes e as movimentadas nos últimos 7 dias.</span>
                     <button type="button" id="req-history-btn" class="font-semibold text-blue-700 hover:text-blue-900 border border-blue-300 hover:bg-blue-50 rounded-md px-2.5 py-1">Carregar histórico completo</button>
                 </div>
                 <div class="overflow-x-auto"><table class="min-w-full divide-y divide-gray-200"><thead class="bg-gray-50"><tr><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Solicitante</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Qtd.</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Justificativa</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Motivo da Rejeição</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Última Atualização</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th></tr></thead><tbody id="requisitions-list" class="bg-white divide-y divide-gray-200"></tbody></table><p id="no-requisitions" class="text-center text-gray-500 py-8 hidden">Nenhuma requisição encontrada.</p></div>
@@ -1249,6 +1249,7 @@
         let deliverySelectionOrder = [];   // ids dos endereços, na ordem em que foram marcados
         let currentDeliveryNeededQty = 0;  // quantidade total da requisição em entrega
         let currentDeliveryItemCode = '';  // código do item sendo entregue
+        let deliveryStockDocs = [];        // endereços do item em entrega (quando o estoque completo não está carregado)
         const editItemModal = document.getElementById('edit-item-modal'), editItemForm = document.getElementById('edit-item-form'), cancelEditItemBtn = document.getElementById('cancel-edit-item');
         const dashboardStartDate = document.getElementById('dashboard-start-date');
         const dashboardEndDate = document.getElementById('dashboard-end-date');
@@ -1326,6 +1327,7 @@
         let allowSecondary = true;
         let allowSecondaryStock = false;
         let kanbanViewRequested = false; // aba Equipamentos já foi aberta nesta sessão
+        let fullStockViewRequested = false; // admin já abriu Estoque/Itens/Catálogo nesta sessão
         let stockFirestoreDb = db;
         let hasProcessedRedirectResult = false;
 
@@ -1553,7 +1555,9 @@
         //   • as que tiveram status alterado nos últimos RECENT_REQUISITIONS_DAYS dias.
         // O histórico completo só é carregado sob demanda (aba Dashboard,
         // Exportar, ou o botão "Carregar histórico completo").
-        const RECENT_REQUISITIONS_DAYS = 30;
+        // 7 dias: suficiente para o funcionário acompanhar o andamento das suas
+        // requisições; pendentes de qualquer data continuam sempre visíveis.
+        const RECENT_REQUISITIONS_DAYS = 7;
         const reqListenerMaps = {
             old: { pending: new Map(), recent: new Map() },
             new: { pending: new Map(), recent: new Map() }
@@ -2516,7 +2520,10 @@
             // entrega de requisições precisam de todos os endereços). Quem só faz
             // requisição não baixa mais a coleção inteira: o saldo do item
             // escolhido é consultado sob demanda (ver ensureSelectedItemStockListener).
-            if (!unsubStock && allowSecondaryStock && isLoggedIn) {
+            // E mesmo para o admin, só depois que ele abre uma aba que mostra o
+            // estoque inteiro (Estoque, Itens ou Catálogo). A entrega de
+            // requisição consulta apenas os endereços do item entregue.
+            if (!unsubStock && allowSecondaryStock && isLoggedIn && fullStockViewRequested) {
                 loadingStock.classList.remove('hidden');
                 unsubStock = onSnapshot(stockLocationsSecondaryCollection, s => {
                     allStockLocationsDocs = s.docs.sort((a, b) => (a.data().address || '').localeCompare(b.data().address || ''));
@@ -3768,10 +3775,17 @@
          * O primeiro local marcado é drenado ao máximo; o local que fecha a conta
          * consome só o necessário, deixando o resto no estoque.
          */
-        function renderDeliveryLocationsList() {
-            const locations = allStockLocationsDocs.filter(doc =>
+        // Endereços com saldo do item em entrega: usa o estoque completo se já
+        // estiver carregado; senão, a consulta só deste item feita ao abrir a entrega.
+        function getDeliveryLocations() {
+            const source = hasFullStockData() ? allStockLocationsDocs : deliveryStockDocs;
+            return source.filter(doc =>
                 doc.data().itemCode === currentDeliveryItemCode && (doc.data().quantity || 0) > 0
             );
+        }
+
+        function renderDeliveryLocationsList() {
+            const locations = getDeliveryLocations();
 
             // Remove da seleção locais que não existem mais / zeraram
             deliverySelectionOrder = deliverySelectionOrder.filter(id => locations.some(l => l.id === id));
@@ -3887,19 +3901,27 @@
             }
 
             if (newStatus === 'Entregue' && oldStatus !== 'Entregue') {
-                if (!hasFullStockData()) {
-                    // O estoque completo começa a carregar no login do admin;
-                    // não afirmamos "estoque insuficiente" antes dele chegar.
-                    startRealtimeListeners();
-                    alert(allowSecondaryStock
-                        ? 'O estoque ainda está sendo carregado. Aguarde alguns segundos e tente novamente.'
-                        : 'O estoque (Projeto 2) não está conectado neste navegador. Clique em "Conectar Projeto 2" e tente novamente.');
-                    return;
-                }
                 const { itemCode, quantity } = reqDocData;
-                const matchingLocations = allStockLocationsDocs.filter(doc =>
-                    doc.data().itemCode === itemCode && (doc.data().quantity || 0) > 0
-                );
+                currentDeliveryItemCode = itemCode;
+                if (!hasFullStockData()) {
+                    // Sem o estoque completo carregado (aba Estoque ainda não
+                    // aberta), busca só os endereços DESTE item — poucas leituras.
+                    // A transação da entrega confere as quantidades de novo no
+                    // servidor, então não há risco de usar um saldo desatualizado.
+                    if (!allowSecondaryStock || !stockLocationsSecondaryCollection) {
+                        alert('O estoque (Projeto 2) não está conectado neste navegador. Clique em "Conectar Projeto 2" e tente novamente.');
+                        return;
+                    }
+                    try {
+                        const snap = await getDocs(query(stockLocationsSecondaryCollection, where('itemCode', '==', itemCode)));
+                        deliveryStockDocs = snap.docs;
+                    } catch (err) {
+                        console.error('Falha ao consultar estoque do item para entrega:', err);
+                        alert('Não foi possível consultar o estoque deste item agora. Tente novamente.');
+                        return;
+                    }
+                }
+                const matchingLocations = getDeliveryLocations();
                 const totalAvailable = matchingLocations.reduce((sum, d) => sum + (d.data().quantity || 0), 0);
 
                 if (totalAvailable < quantity) {
@@ -3909,7 +3931,6 @@
 
                 deliverySelectionOrder = [];
                 currentDeliveryNeededQty = quantity;
-                currentDeliveryItemCode = itemCode;
                 renderDeliveryLocationsList();
 
                 modalLocationReqId.value = reqId;
@@ -3956,10 +3977,10 @@
                         updateData.stockAllocations = null;
                     } else if (stockLocationId) {
                         // Formato legado: entrega feita a partir de um único endereço
-                        const stockEntry = getStockEntryById(stockLocationId);
-                        if (!stockEntry) throw "Localização de estoque da entrega anterior não encontrada.";
+                        // Usa o id direto (não depende do estoque completo estar carregado);
+                        // a existência do endereço é conferida dentro da transação.
                         await runTransaction(secondaryDb, async (transaction) => {
-                            const locationToUpdateRef = getStockDocRef(stockEntry);
+                            const locationToUpdateRef = getStockDocRef(stockLocationId);
                             const locationDoc = await transaction.get(locationToUpdateRef);
                             if (!locationDoc.exists()) throw "Localização de estoque da entrega anterior não encontrada.";
                             const newQuantity = (locationDoc.data().quantity || 0) + quantity;
@@ -3989,9 +4010,7 @@
             const reqId = modalLocationReqId.value;
 
             // Recalcula a alocação final a partir da seleção atual (mesma lógica do render)
-            const locations = allStockLocationsDocs.filter(doc =>
-                doc.data().itemCode === currentDeliveryItemCode && (doc.data().quantity || 0) > 0
-            );
+            const locations = getDeliveryLocations();
             let remaining = currentDeliveryNeededQty;
             const allocations = []; // { locationId, address, quantity }
             for (const locId of deliverySelectionOrder) {
@@ -4414,6 +4433,13 @@
             // primeira vez (quem nunca abre a aba não gasta leituras com ela).
             if (activeView === viewKanban && !kanbanViewRequested) {
                 kanbanViewRequested = true;
+                startRealtimeListeners();
+            }
+
+            // Estoque completo (projeto 2): só carrega quando o admin abre uma
+            // aba que mostra todos os endereços/saldos.
+            if ((activeView === viewStock || activeView === viewItems || activeView === viewCatalog) && !fullStockViewRequested) {
+                fullStockViewRequested = true;
                 startRealtimeListeners();
             }
 
@@ -4878,6 +4904,11 @@
 
         async function clearAllStockRecords() {
             if (!isLoggedIn) return;
+            if (!hasFullStockData()) {
+                fullStockViewRequested = true; startRealtimeListeners();
+                alert('O estoque completo ainda está carregando. Aguarde alguns segundos e tente novamente.');
+                return;
+            }
 
             const totalRecords = allStockLocationsDocs.length;
             if (totalRecords === 0) {
@@ -4961,6 +4992,11 @@
         if (consolidateStockBtn) {
             consolidateStockBtn.addEventListener('click', async () => {
                 if (!isLoggedIn) return;
+                if (!hasFullStockData()) {
+                    fullStockViewRequested = true; startRealtimeListeners();
+                    alert('O estoque completo ainda está carregando. Aguarde alguns segundos e tente novamente.');
+                    return;
+                }
                 if (!confirm(
                     'Isso irá:\n' +
                     '1. Remover espaços de todos os códigos e endereços (ex: "ALM. EXT" → "ALM.EXT")\n' +
